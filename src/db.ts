@@ -1,0 +1,266 @@
+import Dexie, { type EntityTable } from 'dexie'
+
+export type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'ewallet'
+export type CategoryKind = 'income' | 'expense'
+
+export interface Account {
+  id: number
+  name: string
+  type: AccountType
+  startingBalance: number
+  createdAt: string
+}
+
+export interface Category {
+  id: number
+  name: string
+  kind: CategoryKind
+  color: string
+  system?: boolean // hidden from normal category pickers (e.g. balance adjustments)
+}
+
+export interface Transaction {
+  id: number
+  accountId: number
+  categoryId: number
+  amount: number // always positive; sign comes from category.kind
+  date: string // ISO yyyy-MM-dd
+  note: string
+  payoutDateId?: number // set when this transaction logs a scheduled payout occurrence
+  createdAt: string
+}
+
+export interface Budget {
+  id: number
+  categoryId: number
+  monthlyLimit: number
+}
+
+export interface RecurringBill {
+  id: number
+  name: string
+  amount: number
+  dueDay: number // 1-31, clamped to last day of shorter months
+  accountId: number
+  categoryId: number
+  active: boolean
+  lastPaidMonth?: string // 'yyyy-MM'
+}
+
+// A payout schedule is just the "who/where" (which account and category this
+// income lands in). The employer's actual pay dates aren't a simple
+// once-a-month formula (e.g. semi-monthly payroll shifts a few days every
+// period to dodge weekends/holidays), so each concrete date is its own row
+// in PayoutDate rather than a computed "day of month".
+export interface PayoutSchedule {
+  id: number
+  label: string
+  accountId: number
+  categoryId: number
+  active: boolean
+}
+
+export interface PayoutDate {
+  id: number
+  scheduleId: number
+  date: string // ISO yyyy-MM-dd — the actual expected payout date
+  label?: string // optional context, e.g. the raw "no later than..." line it came from
+  loggedTransactionId?: number // set once the user logs the actual amount for this date
+}
+
+// Moving money between your own accounts — doesn't touch income/expense
+// reporting, just shifts balance from one account to another.
+export interface Transfer {
+  id: number
+  fromAccountId: number
+  toAccountId: number
+  amount: number
+  date: string // ISO yyyy-MM-dd
+  note: string
+  createdAt: string
+}
+
+// A learned mapping from a phrase you typed into the quick-command bar to a
+// specific account or category — created when you correct a guess, so the
+// same phrase resolves directly (no fuzzy matching) next time.
+export interface CommandAlias {
+  id: number
+  phrase: string // normalized (lowercase, trimmed)
+  entityType: 'account' | 'category'
+  entityId: number
+}
+
+const db = new Dexie('finance-tracker') as Dexie & {
+  accounts: EntityTable<Account, 'id'>
+  categories: EntityTable<Category, 'id'>
+  transactions: EntityTable<Transaction, 'id'>
+  budgets: EntityTable<Budget, 'id'>
+  recurringBills: EntityTable<RecurringBill, 'id'>
+  payoutSchedules: EntityTable<PayoutSchedule, 'id'>
+  payoutDates: EntityTable<PayoutDate, 'id'>
+  transfers: EntityTable<Transfer, 'id'>
+  commandAliases: EntityTable<CommandAlias, 'id'>
+}
+
+db.version(1).stores({
+  accounts: '++id, name, type',
+  categories: '++id, name, kind',
+  transactions: '++id, accountId, categoryId, date, payoutScheduleId',
+  budgets: '++id, categoryId',
+  recurringBills: '++id, dueDay, active',
+  payoutSchedules: '++id, dayOfMonth, active',
+})
+
+db.version(2).stores({
+  accounts: '++id, name, type',
+  categories: '++id, name, kind',
+  transactions: '++id, accountId, categoryId, date, payoutDateId',
+  budgets: '++id, categoryId',
+  recurringBills: '++id, dueDay, active',
+  payoutSchedules: '++id, active',
+  payoutDates: '++id, scheduleId, date',
+})
+
+db.version(3).stores({
+  accounts: '++id, name, type',
+  categories: '++id, name, kind',
+  transactions: '++id, accountId, categoryId, date, payoutDateId',
+  budgets: '++id, categoryId',
+  recurringBills: '++id, dueDay, active',
+  payoutSchedules: '++id, active',
+  payoutDates: '++id, scheduleId, date',
+  transfers: '++id, fromAccountId, toAccountId, date',
+})
+
+db.version(4).stores({
+  accounts: '++id, name, type',
+  categories: '++id, name, kind',
+  transactions: '++id, accountId, categoryId, date, payoutDateId',
+  budgets: '++id, categoryId',
+  recurringBills: '++id, dueDay, active',
+  payoutSchedules: '++id, active',
+  payoutDates: '++id, scheduleId, date',
+  transfers: '++id, fromAccountId, toAccountId, date',
+  commandAliases: '++id, phrase, entityType',
+})
+
+export default db
+
+export async function saveCommandAlias(
+  phrase: string,
+  entityType: CommandAlias['entityType'],
+  entityId: number,
+) {
+  const normalized = phrase.trim().toLowerCase()
+  if (!normalized) return
+  const existing = await db.commandAliases
+    .where('phrase')
+    .equals(normalized)
+    .and((a) => a.entityType === entityType)
+    .first()
+  if (existing) {
+    await db.commandAliases.update(existing.id, { entityId })
+  } else {
+    await db.commandAliases.add({
+      id: undefined as unknown as number,
+      phrase: normalized,
+      entityType,
+      entityId,
+    })
+  }
+}
+
+export const BALANCE_ADJUSTMENT_CATEGORY = 'Balance Adjustment'
+
+export async function getOrCreateBalanceAdjustmentCategory(): Promise<Category> {
+  const existing = await db.categories.where('name').equals(BALANCE_ADJUSTMENT_CATEGORY).first()
+  if (existing) return existing
+  const id = await db.categories.add({
+    id: undefined as unknown as number,
+    name: BALANCE_ADJUSTMENT_CATEGORY,
+    kind: 'income',
+    color: '#94a3b8',
+    system: true,
+  })
+  return { id, name: BALANCE_ADJUSTMENT_CATEGORY, kind: 'income', color: '#94a3b8', system: true }
+}
+
+// The payout dates from the user's actual semi-monthly payroll schedule
+// (parsed from the company's published table), so it's there from first
+// launch rather than something they have to re-enter.
+const KNOWN_PAYOUT_DATES = [
+  { date: '2026-08-10', label: 'No later than 4pm of August 10 (Mon)' },
+  { date: '2026-08-24', label: 'No later than 4pm of August 24 (Mon)' },
+  { date: '2026-09-08', label: 'No later than 4pm of September 8 (Tue)' },
+  { date: '2026-09-23', label: 'No later than 4pm of September 23 (Wed)' },
+  { date: '2026-10-08', label: 'No later than 4pm of October 8 (Thu)' },
+  { date: '2026-10-23', label: 'No later than 4pm of October 23 (Fri)' },
+  { date: '2026-11-09', label: 'No later than 4pm of November 9 (Mon)' },
+  { date: '2026-11-23', label: 'No later than 4pm of November 23 (Mon)' },
+  { date: '2026-12-07', label: 'No later than 4pm of December 7 (Mon)' },
+  { date: '2026-12-22', label: 'No later than 4pm of December 22 (Tue)' },
+  { date: '2027-01-08', label: 'No later than 4pm of January 8, 2027 (Fri)' },
+]
+
+export async function seedIfEmpty() {
+  // Wrapped in a single readwrite transaction so two concurrent callers (e.g.
+  // React StrictMode's double-invoked effect in dev) can't both pass the
+  // count check before either has inserted, which would duplicate seed data.
+  await db.transaction(
+    'rw',
+    [db.accounts, db.categories, db.payoutSchedules, db.payoutDates],
+    async () => {
+      const accountCount = await db.accounts.count()
+      if (accountCount > 0) return
+
+      const now = new Date().toISOString()
+
+      // GCash, GoTyme, Landbank, and Cash are all everyday spending money
+      // ("checking") — none of them is a dedicated savings account. Savings
+      // is a general bucket you fund yourself via transfers when you want.
+      const accounts: Omit<Account, 'id'>[] = [
+        { name: 'GCash', type: 'checking', startingBalance: 0, createdAt: now },
+        { name: 'GoTyme', type: 'checking', startingBalance: 0, createdAt: now },
+        { name: 'Landbank', type: 'checking', startingBalance: 0, createdAt: now },
+        { name: 'Cash', type: 'cash', startingBalance: 0, createdAt: now },
+        { name: 'Savings', type: 'savings', startingBalance: 0, createdAt: now },
+      ]
+      const accountIds = await Promise.all(accounts.map((a) => db.accounts.add(a as Account)))
+      const goTymeId = accountIds[1]
+
+      const categories: Omit<Category, 'id'>[] = [
+        { name: 'Salary', kind: 'income', color: '#22c55e' },
+        { name: 'Other Income', kind: 'income', color: '#84cc16' },
+        { name: 'Groceries', kind: 'expense', color: '#f97316' },
+        { name: 'Rent', kind: 'expense', color: '#ef4444' },
+        { name: 'Utilities', kind: 'expense', color: '#eab308' },
+        { name: 'Transport', kind: 'expense', color: '#3b82f6' },
+        { name: 'Dining', kind: 'expense', color: '#ec4899' },
+        { name: 'Subscriptions', kind: 'expense', color: '#a855f7' },
+        { name: 'Other Expense', kind: 'expense', color: '#64748b' },
+        { name: BALANCE_ADJUSTMENT_CATEGORY, kind: 'income', color: '#94a3b8', system: true },
+      ]
+      await db.categories.bulkAdd(categories as Category[])
+
+      const salaryCategory = await db.categories.where('name').equals('Salary').first()
+      if (salaryCategory) {
+        const scheduleId = await db.payoutSchedules.add({
+          id: undefined as unknown as number,
+          label: 'Salary',
+          accountId: goTymeId,
+          categoryId: salaryCategory.id,
+          active: true,
+        } as PayoutSchedule)
+
+        await db.payoutDates.bulkAdd(
+          KNOWN_PAYOUT_DATES.map((pd) => ({
+            id: undefined as unknown as number,
+            scheduleId,
+            date: pd.date,
+            label: pd.label,
+          })),
+        )
+      }
+    },
+  )
+}

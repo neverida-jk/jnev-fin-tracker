@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light dark;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  @apply bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+  font: 16px/1.45 system-ui, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  @apply bg-white dark:bg-slate-900 shadow-xl;
+}
+
+input, select, textarea {
+  font: inherit;
+}

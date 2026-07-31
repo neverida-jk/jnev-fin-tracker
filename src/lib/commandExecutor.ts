@@ -1,0 +1,241 @@
+import db, { getOrCreateBalanceAdjustmentCategory } from '../db'
+import type { ParsedCommand } from './commandParser'
+
+export interface ExecutionResult {
+  ok: boolean
+  message: string
+  undo?: () => Promise<void>
+  /** Set for expense/income results — lets the UI patch the account/category
+   * afterward (and save the correction as a learned alias). */
+  transactionId?: number
+  accountPhrase?: string
+  categoryPhrase?: string
+}
+
+export async function executeCommand(cmd: ParsedCommand): Promise<ExecutionResult> {
+  switch (cmd.type) {
+    case 'expense':
+    case 'income': {
+      if (!cmd.amount || cmd.accountId === undefined || cmd.categoryId === undefined) {
+        return { ok: false, message: "Couldn't figure out the account or category for that." }
+      }
+
+      const id = await db.transactions.add({
+        id: undefined as unknown as number,
+        accountId: cmd.accountId,
+        categoryId: cmd.categoryId,
+        amount: cmd.amount,
+        date: cmd.date,
+        note: cmd.note ?? '',
+        createdAt: new Date().toISOString(),
+      })
+      return {
+        ok: true,
+        message: cmd.summary,
+        transactionId: id,
+        accountPhrase: cmd.accountPhrase,
+        categoryPhrase: cmd.categoryPhrase,
+        undo: async () => {
+          await db.transactions.delete(id)
+        },
+      }
+    }
+
+    case 'transfer': {
+      if (!cmd.amount || cmd.fromAccountId === undefined || cmd.toAccountId === undefined) {
+        return { ok: false, message: "Couldn't figure out the two accounts for that transfer." }
+      }
+      const id = await db.transfers.add({
+        id: undefined as unknown as number,
+        fromAccountId: cmd.fromAccountId,
+        toAccountId: cmd.toAccountId,
+        amount: cmd.amount,
+        date: cmd.date,
+        note: cmd.raw,
+        createdAt: new Date().toISOString(),
+      })
+      return {
+        ok: true,
+        message: cmd.summary,
+        undo: async () => {
+          await db.transfers.delete(id)
+        },
+      }
+    }
+
+    case 'addBalance': {
+      if (!cmd.amount || cmd.accountId === undefined) {
+        return { ok: false, message: "Couldn't figure out which account to add balance to." }
+      }
+      const category = await getOrCreateBalanceAdjustmentCategory()
+      const id = await db.transactions.add({
+        id: undefined as unknown as number,
+        accountId: cmd.accountId,
+        categoryId: category.id,
+        amount: cmd.amount,
+        date: cmd.date,
+        note: cmd.raw,
+        createdAt: new Date().toISOString(),
+      })
+      return {
+        ok: true,
+        message: cmd.summary,
+        undo: async () => {
+          await db.transactions.delete(id)
+        },
+      }
+    }
+
+    case 'createAccount': {
+      if (!cmd.newAccountName) {
+        return { ok: false, message: "Couldn't figure out the account name." }
+      }
+      const lowerName = cmd.newAccountName.toLowerCase()
+      const type = lowerName.includes('cash')
+        ? 'cash'
+        : lowerName.includes('sav')
+          ? 'savings'
+          : 'checking'
+
+      const accountId = await db.accounts.add({
+        id: undefined as unknown as number,
+        name: cmd.newAccountName,
+        type,
+        startingBalance: 0,
+        createdAt: new Date().toISOString(),
+      })
+
+      let transactionId: number | undefined
+      if (cmd.amount) {
+        const category = await getOrCreateBalanceAdjustmentCategory()
+        transactionId = await db.transactions.add({
+          id: undefined as unknown as number,
+          accountId,
+          categoryId: category.id,
+          amount: cmd.amount,
+          date: cmd.date,
+          note: cmd.raw,
+          createdAt: new Date().toISOString(),
+        })
+      }
+
+      return {
+        ok: true,
+        message: cmd.summary,
+        undo: async () => {
+          if (transactionId !== undefined) await db.transactions.delete(transactionId)
+          await db.accounts.delete(accountId)
+        },
+      }
+    }
+
+    case 'setBudget': {
+      if (cmd.amount === undefined || cmd.categoryId === undefined) {
+        return { ok: false, message: "Couldn't figure out the category or amount for that budget." }
+      }
+      const existing = await db.budgets.where('categoryId').equals(cmd.categoryId).first()
+      if (existing) {
+        const previousLimit = existing.monthlyLimit
+        await db.budgets.update(existing.id, { monthlyLimit: cmd.amount })
+        return {
+          ok: true,
+          message: cmd.summary,
+          undo: async () => {
+            await db.budgets.update(existing.id, { monthlyLimit: previousLimit })
+          },
+        }
+      }
+      const id = await db.budgets.add({
+        id: undefined as unknown as number,
+        categoryId: cmd.categoryId,
+        monthlyLimit: cmd.amount,
+      })
+      return {
+        ok: true,
+        message: cmd.summary,
+        undo: async () => {
+          await db.budgets.delete(id)
+        },
+      }
+    }
+
+    case 'addRecurringBill': {
+      if (!cmd.amount || cmd.accountId === undefined || cmd.categoryId === undefined || !cmd.billName) {
+        return { ok: false, message: "Couldn't figure out the bill's name, amount, account, or category." }
+      }
+      const id = await db.recurringBills.add({
+        id: undefined as unknown as number,
+        name: cmd.billName,
+        amount: cmd.amount,
+        dueDay: cmd.dueDay ?? 1,
+        accountId: cmd.accountId,
+        categoryId: cmd.categoryId,
+        active: true,
+      })
+      return {
+        ok: true,
+        message: cmd.summary,
+        undo: async () => {
+          await db.recurringBills.delete(id)
+        },
+      }
+    }
+
+    case 'addPayoutSchedule': {
+      if (cmd.accountId === undefined || cmd.categoryId === undefined || !cmd.scheduleLabel) {
+        return { ok: false, message: "Couldn't figure out the payout schedule's label, account, or category." }
+      }
+      const id = await db.payoutSchedules.add({
+        id: undefined as unknown as number,
+        label: cmd.scheduleLabel,
+        accountId: cmd.accountId,
+        categoryId: cmd.categoryId,
+        active: true,
+      })
+      return {
+        ok: true,
+        message: cmd.summary,
+        undo: async () => {
+          await db.payoutSchedules.delete(id)
+        },
+      }
+    }
+
+    case 'logPayout': {
+      if (!cmd.amount || cmd.accountId === undefined || cmd.categoryId === undefined || cmd.payoutDateId === undefined) {
+        return { ok: false, message: "Couldn't figure out the payout details." }
+      }
+      const payoutDateId = cmd.payoutDateId
+      const id = await db.transactions.add({
+        id: undefined as unknown as number,
+        accountId: cmd.accountId,
+        categoryId: cmd.categoryId,
+        amount: cmd.amount,
+        date: cmd.date,
+        note: cmd.raw,
+        payoutDateId,
+        createdAt: new Date().toISOString(),
+      })
+      await db.payoutDates.update(payoutDateId, { loggedTransactionId: id })
+      return {
+        ok: true,
+        message: cmd.summary,
+        transactionId: id,
+        accountPhrase: cmd.accountPhrase,
+        undo: async () => {
+          await db.payoutDates.update(payoutDateId, { loggedTransactionId: undefined })
+          await db.transactions.delete(id)
+        },
+      }
+    }
+
+    case 'query':
+      // The answer (cmd.summary) is already fully computed by the local,
+      // deterministic script in financialContext.ts — nothing to execute.
+      return { ok: true, message: cmd.summary }
+
+    case 'unrecognized':
+    default:
+      return { ok: false, message: cmd.summary }
+  }
+}
