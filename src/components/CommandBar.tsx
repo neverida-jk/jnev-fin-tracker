@@ -1,13 +1,53 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Sparkles, X, Check, Undo2, ArrowRight, Pencil } from 'lucide-react'
+import { Sparkles, X, Check, Undo2, ArrowRight, Pencil, HelpCircle } from 'lucide-react'
 import db, { saveCommandAlias } from '../db'
-import { parseCommand } from '../lib/commandParser'
+import {
+  parseCommand,
+  getFuzzyFields,
+  fuzzyFieldPhrase,
+  type ParsedCommand,
+  type FuzzyField,
+} from '../lib/commandParser'
 import { executeCommand, type ExecutionResult } from '../lib/commandExecutor'
 import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import PickerGrid from './PickerGrid'
 import { tapScale } from '../lib/motion'
+
+// Which category "kind" a fuzzy categoryId belongs to, per command type — so
+// the correction picker offers the right list (income vs expense).
+function categoryKindFor(cmd: ParsedCommand): 'income' | 'expense' {
+  return cmd.type === 'income' || cmd.type === 'addPayoutSchedule' ? 'income' : 'expense'
+}
+
+function fuzzyFieldLabel(field: FuzzyField): string {
+  switch (field) {
+    case 'accountId':
+      return 'Account'
+    case 'categoryId':
+      return 'Category'
+    case 'fromAccountId':
+      return 'From'
+    case 'toAccountId':
+      return 'To'
+  }
+}
+
+// Slightly friendlier wording than fuzzyFieldLabel for the "Choose ___"
+// picker heading (PickerGrid lowercases whatever it's given).
+function fuzzyFieldPickerTitle(field: FuzzyField): string {
+  switch (field) {
+    case 'accountId':
+      return 'account'
+    case 'categoryId':
+      return 'category'
+    case 'fromAccountId':
+      return 'source account'
+    case 'toAccountId':
+      return 'destination account'
+  }
+}
 
 const EXAMPLES = [
   'expense 200 groceries',
@@ -24,6 +64,20 @@ export default function CommandBar() {
   const [result, setResult] = useState<ExecutionResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [fixing, setFixing] = useState<'account' | 'category' | null>(null)
+
+  // Pre-execution confidence gate: fuzzy-matched fields on the *current*
+  // parsed command that the user has already confirmed or corrected, and any
+  // corrections (entity id overrides) they picked instead of the guess. Reset
+  // whenever the input text changes — see resetFuzzyGate().
+  const [confirmedFuzzyFields, setConfirmedFuzzyFields] = useState<Set<FuzzyField>>(new Set())
+  const [fuzzyOverrides, setFuzzyOverrides] = useState<Partial<Record<FuzzyField, number>>>({})
+  const [correctingField, setCorrectingField] = useState<FuzzyField | null>(null)
+
+  function resetFuzzyGate() {
+    setConfirmedFuzzyFields(new Set())
+    setFuzzyOverrides({})
+    setCorrectingField(null)
+  }
 
   const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
   const categories = useLiveQuery(() => db.categories.toArray(), [], [])
@@ -71,11 +125,29 @@ export default function CommandBar() {
     })
   }, [text, accounts, categories, aliases, defaultAccountId, budgets, transactions, transfers, payoutSchedules, payoutDates])
 
+  // Fields on the current parsed command whose match is a low-confidence
+  // (Levenshtein) guess — these need an explicit "yes"/correction before
+  // executeCommand ever gets called. See src/lib/commandParser.ts.
+  const fuzzyFields = useMemo(() => (parsed ? getFuzzyFields(parsed) : []), [parsed])
+  const pendingFuzzyFields = useMemo(
+    () => fuzzyFields.filter((f) => !confirmedFuzzyFields.has(f) && fuzzyOverrides[f] === undefined),
+    [fuzzyFields, confirmedFuzzyFields, fuzzyOverrides],
+  )
+
+  // The command actually sent to executeCommand — the parser's guess for any
+  // fuzzy field the user corrected via the inline picker, left as-is
+  // otherwise (including fields the user just confirmed as correct).
+  const effectiveCommand = useMemo(() => {
+    if (!parsed || Object.keys(fuzzyOverrides).length === 0) return parsed
+    return { ...parsed, ...fuzzyOverrides }
+  }, [parsed, fuzzyOverrides])
+
   function openBar() {
     setOpen(true)
     setText('')
     setResult(null)
     setFixing(null)
+    resetFuzzyGate()
   }
 
   function closeBar() {
@@ -83,17 +155,52 @@ export default function CommandBar() {
     setText('')
     setResult(null)
     setFixing(null)
+    resetFuzzyGate()
   }
 
   async function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault()
-    if (!parsed || busy) return
+    if (!effectiveCommand || busy || pendingFuzzyFields.length > 0) return
     setBusy(true)
-    const res = await executeCommand(parsed)
+    const res = await executeCommand(effectiveCommand)
     setBusy(false)
     setResult(res)
     setFixing(null)
+    resetFuzzyGate()
     if (res.ok) setText('')
+  }
+
+  // User said the fuzzy guess was right — lock it in as a learned alias
+  // (so the same phrase resolves exactly next time) and let it through the
+  // gate without changing the guessed entity.
+  async function confirmFuzzyField(field: FuzzyField) {
+    if (!parsed) return
+    const id = parsed[field]
+    if (id === undefined) return
+    const phraseInfo = fuzzyFieldPhrase(parsed, field)
+    if (phraseInfo) {
+      await saveCommandAlias(phraseInfo.phrase, phraseInfo.entityType, id)
+    }
+    setConfirmedFuzzyFields((prev) => new Set(prev).add(field))
+  }
+
+  // User picked a different account/category than the guess — override it
+  // for this submission and learn the correction as an alias too, same as
+  // confirming, just pointed at the entity the user actually chose.
+  async function correctFuzzyField(field: FuzzyField, entityId: number) {
+    if (parsed) {
+      const phraseInfo = fuzzyFieldPhrase(parsed, field)
+      if (phraseInfo) {
+        await saveCommandAlias(phraseInfo.phrase, phraseInfo.entityType, entityId)
+      }
+    }
+    setFuzzyOverrides((prev) => ({ ...prev, [field]: entityId }))
+    setCorrectingField(null)
+  }
+
+  function fuzzyFieldEntityName(field: FuzzyField, id: number): string {
+    if (field === 'categoryId') return (categories ?? []).find((c) => c.id === id)?.name ?? 'Unknown'
+    return (accounts ?? []).find((a) => a.id === id)?.name ?? 'Unknown'
   }
 
   async function handleUndo() {
@@ -160,7 +267,27 @@ export default function CommandBar() {
                 </button>
               </div>
 
-              {fixing ? (
+              {correctingField ? (
+                <div>
+                  <button
+                    onClick={() => setCorrectingField(null)}
+                    className="mb-2 text-xs font-medium text-indigo-600 dark:text-indigo-400"
+                  >
+                    ← Back
+                  </button>
+                  <PickerGrid
+                    title={fuzzyFieldPickerTitle(correctingField)}
+                    items={
+                      correctingField === 'categoryId'
+                        ? (parsed && categoryKindFor(parsed) === 'income' ? incomeCategories : expenseCategories).map(
+                            (c) => ({ id: c.id, label: c.name, dotColor: c.color }),
+                          )
+                        : (accounts ?? []).map((a) => ({ id: a.id, label: a.name, icon: ACCOUNT_ICONS[a.type] }))
+                    }
+                    onPick={(id) => correctFuzzyField(correctingField, id)}
+                  />
+                </div>
+              ) : fixing ? (
                 <div>
                   <button
                     onClick={() => setFixing(null)}
@@ -187,6 +314,7 @@ export default function CommandBar() {
                     onChange={(e) => {
                       setText(e.target.value)
                       setResult(null)
+                      resetFuzzyGate()
                     }}
                     placeholder='Try "expense 200 groceries"'
                     className="w-full rounded-lg border border-slate-300 px-3 py-3 text-base dark:border-slate-700 dark:bg-slate-800"
@@ -259,13 +387,62 @@ export default function CommandBar() {
                     )}
                   </AnimatePresence>
 
+                  {parsed && !result && pendingFuzzyFields.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm dark:bg-amber-950"
+                    >
+                      <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800 dark:text-amber-200">
+                        <HelpCircle size={13} className="shrink-0" />
+                        Not sure — please confirm:
+                      </p>
+                      {pendingFuzzyFields.map((field) => {
+                        const id = parsed[field]
+                        if (id === undefined) return null
+                        return (
+                          <div
+                            key={field}
+                            className="flex items-center justify-between gap-2 rounded-md bg-white px-2.5 py-1.5 dark:bg-slate-800"
+                          >
+                            <span className="text-slate-700 dark:text-slate-300">
+                              {fuzzyFieldLabel(field)}: <strong>{fuzzyFieldEntityName(field, id)}</strong>
+                            </span>
+                            <span className="flex shrink-0 gap-3">
+                              <button
+                                type="button"
+                                onClick={() => confirmFuzzyField(field)}
+                                className="flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400"
+                              >
+                                <Check size={12} /> Yes
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCorrectingField(field)}
+                                className="flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400"
+                              >
+                                <Pencil size={11} /> Fix
+                              </button>
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </motion.div>
+                  )}
+
                   <motion.button
                     {...tapScale}
                     type="submit"
-                    disabled={!parsed || parsed.type === 'unrecognized' || busy}
+                    disabled={!parsed || parsed.type === 'unrecognized' || busy || pendingFuzzyFields.length > 0}
                     className="w-full rounded-lg bg-indigo-600 py-3 font-medium text-white disabled:opacity-40"
                   >
-                    {busy ? 'Working…' : parsed?.type === 'query' ? 'Ask' : 'Execute'}
+                    {busy
+                      ? 'Working…'
+                      : pendingFuzzyFields.length > 0
+                        ? 'Confirm above first'
+                        : parsed?.type === 'query'
+                          ? 'Ask'
+                          : 'Execute'}
                   </motion.button>
 
                   {!text && (

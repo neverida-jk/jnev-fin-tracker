@@ -2,6 +2,7 @@ import type { Account, Budget, Category, CommandAlias, PayoutDate, PayoutSchedul
 import { todayISO } from './dates'
 import { CATEGORY_KEYWORDS } from './categoryLexicon'
 import { buildFinancialContext, composeBudgetHealthCheck, composeLocalAnswer, composePurchaseAdvice } from './financialContext'
+import { getNextPendingPayout } from './payout'
 
 export type ParsedCommandType =
   | 'expense'
@@ -15,6 +16,16 @@ export type ParsedCommandType =
   | 'logPayout'
   | 'query'
   | 'unrecognized'
+
+/** How sure the parser is about a resolved account/category:
+ * - 'exact': exact name match, substring match, learned CommandAlias, or a
+ *   deliberate fallback (default account, "Other" bucket) — safe to act on
+ *   immediately.
+ * - 'fuzzy': only matched via Levenshtein edit-distance — close enough to
+ *   suggest, but typo-prone (e.g. an unrelated word landing on "Rent" at
+ *   edit-distance 1), so the caller should confirm with the user before
+ *   writing anything. */
+export type MatchConfidence = 'exact' | 'fuzzy'
 
 export interface ParsedCommand {
   type: ParsedCommandType
@@ -43,6 +54,19 @@ export interface ParsedCommand {
   accountPhrase?: string
   /** The phrase tried against categories (or used to name a new one). */
   categoryPhrase?: string
+  /** The phrases tried for a transfer's two sides — same purpose as
+   * accountPhrase, split in two since a transfer resolves two accounts. */
+  fromAccountPhrase?: string
+  toAccountPhrase?: string
+  /** Confidence of each resolved field, present whenever the corresponding
+   * *Id field is set from an account/category match (as opposed to being
+   * absent, or naming a brand-new entity like `createAccount`). Consumers
+   * (CommandBar) should gate execution behind user confirmation whenever any
+   * of these is 'fuzzy'. */
+  accountConfidence?: MatchConfidence
+  categoryConfidence?: MatchConfidence
+  fromAccountConfidence?: MatchConfidence
+  toAccountConfidence?: MatchConfidence
 }
 
 // Cheap Levenshtein distance for fuzzy word matching — good enough for short
@@ -73,21 +97,29 @@ function properCase(s: string): string {
   return s.replace(/\b\w/g, (ch) => ch.toUpperCase())
 }
 
+/** An entity match plus how it was found — see `MatchConfidence`. */
+export interface Resolution<T> {
+  entity: T
+  confidence: MatchConfidence
+}
+
 /** Finds the entity whose name best matches `text`. Tries the whole phrase
- * first (exact, then substring, then edit-distance), then falls back to
- * checking each individual word — so "grocery run" still finds "Groceries"
- * even though the two-word phrase itself doesn't match. */
-function fuzzyFind<T extends { name: string }>(text: string, candidates: T[]): T | undefined {
+ * first (exact, then substring — both 'exact' confidence), then falls back
+ * to edit-distance ('fuzzy' confidence, since a close-but-wrong word can slip
+ * under the threshold), checking each individual word too — so "grocery run"
+ * still finds "Groceries" even though the two-word phrase itself doesn't
+ * match. */
+function fuzzyFind<T extends { name: string }>(text: string, candidates: T[]): Resolution<T> | undefined {
   const normText = normalize(text)
   if (!normText || candidates.length === 0) return undefined
   const words = normText.split(/\s+/).filter(Boolean)
 
   for (const c of candidates) {
-    if (normText === normalize(c.name)) return c
+    if (normText === normalize(c.name)) return { entity: c, confidence: 'exact' }
   }
   for (const c of candidates) {
     const cName = normalize(c.name)
-    if (normText.includes(cName) || cName.includes(normText)) return c
+    if (normText.includes(cName) || cName.includes(normText)) return { entity: c, confidence: 'exact' }
   }
 
   let best: { c: T; dist: number } | undefined
@@ -100,7 +132,7 @@ function fuzzyFind<T extends { name: string }>(text: string, candidates: T[]): T
     consider(c, cName, levenshtein(normText, cName))
     for (const w of words) consider(c, cName, levenshtein(w, cName))
   }
-  return best?.c
+  return best ? { entity: best.c, confidence: 'fuzzy' } : undefined
 }
 
 /** Looks up a learned alias for `phrase` and returns the matching entity if
@@ -119,8 +151,25 @@ function findByAlias<T extends { id: number }>(
   return pool.find((p) => p.id === alias.entityId)
 }
 
-function resolveAccount(phrase: string, accounts: Account[], aliases: CommandAlias[]): Account | undefined {
-  return findByAlias(phrase, 'account', aliases, accounts) ?? fuzzyFind(phrase, accounts)
+function resolveAccount(phrase: string, accounts: Account[], aliases: CommandAlias[]): Resolution<Account> | undefined {
+  const aliasHit = findByAlias(phrase, 'account', aliases, accounts)
+  if (aliasHit) return { entity: aliasHit, confidence: 'exact' }
+  return fuzzyFind(phrase, accounts)
+}
+
+/** Same idea as `resolveAccount`, for categories — checks the learned alias
+ * table, then the curated keyword lexicon (both 'exact' confidence, since
+ * neither is edit-distance-based), then falls back to fuzzy matching. */
+function resolveCategory(
+  phrase: string,
+  categories: Category[],
+  aliases: CommandAlias[],
+): Resolution<Category> | undefined {
+  const aliasHit = findByAlias(phrase, 'category', aliases, categories)
+  if (aliasHit) return { entity: aliasHit, confidence: 'exact' }
+  const lexiconHit = findByLexicon(phrase, categories)
+  if (lexiconHit) return { entity: lexiconHit, confidence: 'exact' }
+  return fuzzyFind(phrase, categories)
 }
 
 /** Checks `phrase` against the built-in word-family lexicon (e.g. "jeep",
@@ -149,14 +198,20 @@ function splitAccountAndCategoryText(
   cleaned: string,
   accounts: Account[],
   aliases: CommandAlias[],
-): { account: Account | undefined; accountPhrase: string; categoryPhrase: string } {
+): {
+  account: Account | undefined
+  accountConfidence: MatchConfidence | undefined
+  accountPhrase: string
+  categoryPhrase: string
+} {
   const words = cleaned.split(/\s+/).filter(Boolean)
 
   for (let i = 0; i < words.length; i++) {
     const hit = resolveAccount(words[i], accounts, aliases)
     if (hit) {
       return {
-        account: hit,
+        account: hit.entity,
+        accountConfidence: hit.confidence,
         accountPhrase: words[i],
         categoryPhrase: words.filter((_, j) => j !== i).join(' ').trim(),
       }
@@ -165,10 +220,15 @@ function splitAccountAndCategoryText(
 
   const wholePhraseHit = words.length > 1 ? resolveAccount(cleaned, accounts, aliases) : undefined
   if (wholePhraseHit) {
-    return { account: wholePhraseHit, accountPhrase: cleaned, categoryPhrase: '' }
+    return {
+      account: wholePhraseHit.entity,
+      accountConfidence: wholePhraseHit.confidence,
+      accountPhrase: cleaned,
+      categoryPhrase: '',
+    }
   }
 
-  return { account: undefined, accountPhrase: cleaned, categoryPhrase: cleaned }
+  return { account: undefined, accountConfidence: undefined, accountPhrase: cleaned, categoryPhrase: cleaned }
 }
 
 // Pure grammar/filler words stripped out before scanning a free-text question
@@ -296,18 +356,26 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
       .trim()
     if (!cleaned) return unrecognized
 
-    const { account, accountPhrase, categoryPhrase } = splitAccountAndCategoryText(cleaned, ctx.accounts, aliases)
-    const category = categoryPhrase
-      ? findByAlias(categoryPhrase, 'category', aliases, incomeCategories) ??
-        findByLexicon(categoryPhrase, incomeCategories) ??
-        fuzzyFind(categoryPhrase, incomeCategories)
-      : undefined
-    const resolvedCategory = category ?? incomeCategories.find((c) => c.name.startsWith('Other')) ?? incomeCategories[0]
+    const { account, accountConfidence, accountPhrase, categoryPhrase } = splitAccountAndCategoryText(
+      cleaned,
+      ctx.accounts,
+      aliases,
+    )
+    const categoryMatch = categoryPhrase ? resolveCategory(categoryPhrase, incomeCategories, aliases) : undefined
+    const resolvedCategory =
+      categoryMatch?.entity ?? incomeCategories.find((c) => c.name.startsWith('Other')) ?? incomeCategories[0]
     if (!resolvedCategory) return unrecognized
+    // Falling back to the default "Other" bucket is a deliberate, safe choice
+    // (not a guess), so it's 'exact' confidence just like a real match.
+    const categoryConfidence: MatchConfidence = categoryMatch?.confidence ?? 'exact'
 
     const defaultAccount = ctx.accounts.find((a) => a.id === ctx.defaultAccountId) ?? ctx.accounts[0]
     const resolvedAccount = account ?? defaultAccount
     if (!resolvedAccount) return unrecognized
+    // accountConfidence is only undefined when `account` itself is undefined
+    // (see splitAccountAndCategoryText) — falling back to the default account
+    // is, like the category fallback above, a deliberate choice, not a guess.
+    const resolvedAccountConfidence: MatchConfidence = accountConfidence ?? 'exact'
 
     const label = categoryPhrase ? properCase(categoryPhrase) : resolvedCategory.name
 
@@ -319,6 +387,9 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
       date,
       raw,
       accountPhrase,
+      categoryPhrase,
+      accountConfidence: resolvedAccountConfidence,
+      categoryConfidence,
       summary: `Add payout schedule "${label}" · ${resolvedCategory.name} · ${resolvedAccount.name}`,
     }
   }
@@ -331,36 +402,39 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
     const { amount, rest } = extractAmount(text)
     if (!amount) return unrecognized
 
-    const activeSchedules = (ctx.payoutSchedules ?? []).filter((s) => s.active)
-    const pending = (ctx.payoutDates ?? [])
-      .filter((pd) => !pd.loggedTransactionId && pd.date <= date && activeSchedules.some((s) => s.id === pd.scheduleId))
-      .sort((a, b) => a.date.localeCompare(b.date))[0]
-
-    if (!pending) {
+    const nextPending = getNextPendingPayout(ctx.payoutSchedules ?? [], ctx.payoutDates ?? [])
+    if (!nextPending) {
       return { type: 'unrecognized', date, raw, summary: 'No pending payout to log right now.' }
     }
-    const schedule = activeSchedules.find((s) => s.id === pending.scheduleId)
-    const category = schedule ? ctx.categories.find((c) => c.id === schedule.categoryId) : undefined
-    if (!schedule || !category) return unrecognized
+    const { payoutDate: pending, schedule } = nextPending
+    const category = ctx.categories.find((c) => c.id === schedule.categoryId)
+    if (!category) return unrecognized
 
     const cleaned = rest
       .replace(/^(log|record)\b/, ' ')
       .replace(/\bpayout\b/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
-    const { account, accountPhrase } = splitAccountAndCategoryText(cleaned, ctx.accounts, aliases)
+    const { account, accountConfidence, accountPhrase } = splitAccountAndCategoryText(cleaned, ctx.accounts, aliases)
     const resolvedAccount = account ?? ctx.accounts.find((a) => a.id === schedule.accountId) ?? ctx.accounts[0]
     if (!resolvedAccount) return unrecognized
+    // Falling back to the schedule's own account (or accounts[0]) is a
+    // deliberate default, not a guess, so it's 'exact' confidence.
+    const resolvedAccountConfidence: MatchConfidence = accountConfidence ?? 'exact'
 
     return {
       type: 'logPayout',
       amount,
       accountId: resolvedAccount.id,
+      // The category comes straight from the payout schedule, never a
+      // text match, so it's always trustworthy.
       categoryId: category.id,
+      categoryConfidence: 'exact',
       payoutDateId: pending.id,
       date,
       raw,
       accountPhrase,
+      accountConfidence: resolvedAccountConfidence,
       summary: `Log payout ₱${amount.toLocaleString()} · ${category.name} · ${resolvedAccount.name} (${schedule.label})`,
     }
   }
@@ -384,19 +458,22 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
       .trim()
     if (!cleaned) return unrecognized
 
-    const { account, accountPhrase, categoryPhrase } = splitAccountAndCategoryText(cleaned, ctx.accounts, aliases)
+    const { account, accountConfidence, accountPhrase, categoryPhrase } = splitAccountAndCategoryText(
+      cleaned,
+      ctx.accounts,
+      aliases,
+    )
     if (!categoryPhrase) return unrecognized
 
-    const category = findByAlias(categoryPhrase, 'category', aliases, expenseCategories) ??
-      findByLexicon(categoryPhrase, expenseCategories) ??
-      fuzzyFind(categoryPhrase, expenseCategories) ??
-      expenseCategories.find((c) => c.name.startsWith('Other')) ??
-      expenseCategories[0]
+    const categoryMatch = resolveCategory(categoryPhrase, expenseCategories, aliases)
+    const category = categoryMatch?.entity ?? expenseCategories.find((c) => c.name.startsWith('Other')) ?? expenseCategories[0]
     if (!category) return unrecognized
+    const categoryConfidence: MatchConfidence = categoryMatch?.confidence ?? 'exact'
 
     const defaultAccount = ctx.accounts.find((a) => a.id === ctx.defaultAccountId) ?? ctx.accounts[0]
     const resolvedAccount = account ?? defaultAccount
     if (!resolvedAccount) return unrecognized
+    const resolvedAccountConfidence: MatchConfidence = accountConfidence ?? 'exact'
 
     const billName = properCase(categoryPhrase)
 
@@ -410,6 +487,9 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
       date,
       raw,
       accountPhrase,
+      categoryPhrase,
+      accountConfidence: resolvedAccountConfidence,
+      categoryConfidence,
       summary: `Recurring bill "${billName}" ₱${amount.toLocaleString()} · due day ${dueDay} · ${category.name} · ${resolvedAccount.name}`,
     }
   }
@@ -428,15 +508,16 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
       .trim()
     if (!cleaned) return unrecognized
 
-    const category = findByAlias(cleaned, 'category', aliases, expenseCategories) ??
-      findByLexicon(cleaned, expenseCategories) ??
-      fuzzyFind(cleaned, expenseCategories)
-    if (!category) return unrecognized
+    const categoryMatch = resolveCategory(cleaned, expenseCategories, aliases)
+    if (!categoryMatch) return unrecognized
+    const { entity: category, confidence: categoryConfidence } = categoryMatch
 
     return {
       type: 'setBudget',
       amount,
       categoryId: category.id,
+      categoryPhrase: cleaned,
+      categoryConfidence,
       date,
       raw,
       summary: `Set ${category.name} budget to ₱${amount.toLocaleString()}/month`,
@@ -503,17 +584,21 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
     const [beforeTo, afterTo] = rest.split(/\bto\b/)
     const fromText = (beforeTo ?? '').replace(/\b(transfer|move|from)\b/g, ' ')
     const toText = afterTo ?? ''
-    const fromAccount = resolveAccount(fromText, ctx.accounts, aliases)
-    const toAccount = resolveAccount(toText, ctx.accounts, aliases)
-    if (amount && fromAccount && toAccount && fromAccount.id !== toAccount.id) {
+    const fromMatch = resolveAccount(fromText, ctx.accounts, aliases)
+    const toMatch = resolveAccount(toText, ctx.accounts, aliases)
+    if (amount && fromMatch && toMatch && fromMatch.entity.id !== toMatch.entity.id) {
       return {
         type: 'transfer',
         amount,
-        fromAccountId: fromAccount.id,
-        toAccountId: toAccount.id,
+        fromAccountId: fromMatch.entity.id,
+        toAccountId: toMatch.entity.id,
+        fromAccountPhrase: fromText.trim(),
+        toAccountPhrase: toText.trim(),
+        fromAccountConfidence: fromMatch.confidence,
+        toAccountConfidence: toMatch.confidence,
         date,
         raw,
-        summary: `Transfer ₱${amount.toLocaleString()} from ${fromAccount.name} to ${toAccount.name}`,
+        summary: `Transfer ₱${amount.toLocaleString()} from ${fromMatch.entity.name} to ${toMatch.entity.name}`,
       }
     }
     return unrecognized
@@ -529,13 +614,16 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
       .trim()
 
     if (name) {
-      const existingAccount = resolveAccount(name, ctx.accounts, aliases)
-      if (existingAccount) {
+      const existingMatch = resolveAccount(name, ctx.accounts, aliases)
+      if (existingMatch) {
+        const existingAccount = existingMatch.entity
         if (amount) {
           return {
             type: 'addBalance',
             amount,
             accountId: existingAccount.id,
+            accountPhrase: name,
+            accountConfidence: existingMatch.confidence,
             date,
             raw,
             summary: `Add ₱${amount.toLocaleString()} balance to ${existingAccount.name}`,
@@ -583,27 +671,28 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
     const kind: 'expense' | 'income' = isIncome && !isExpense ? 'income' : 'expense'
     const categories = kind === 'expense' ? expenseCategories : incomeCategories
 
-    const { account, accountPhrase, categoryPhrase } = splitAccountAndCategoryText(
+    const { account, accountConfidence, accountPhrase, categoryPhrase } = splitAccountAndCategoryText(
       cleaned,
       ctx.accounts,
       aliases,
     )
 
-    const category = categoryPhrase
-      ? findByAlias(categoryPhrase, 'category', aliases, categories) ??
-        findByLexicon(categoryPhrase, categories) ??
-        fuzzyFind(categoryPhrase, categories)
-      : undefined
+    const categoryMatch = categoryPhrase ? resolveCategory(categoryPhrase, categories, aliases) : undefined
+    const category = categoryMatch?.entity
 
     const defaultAccount = ctx.accounts.find((a) => a.id === ctx.defaultAccountId) ?? ctx.accounts[0]
     const resolvedAccount = account ?? defaultAccount
     if (!resolvedAccount) return unrecognized
+    const resolvedAccountConfidence: MatchConfidence = accountConfidence ?? 'exact'
 
     // A matched category wins outright. Otherwise fall back to the general
     // bucket, but keep the specific word you typed (e.g. "jeep") as the
     // transaction's note so you can still tell entries apart later.
     const resolvedCategory = category ?? categories.find((c) => c.name.startsWith('Other')) ?? categories[0]
     if (!resolvedCategory) return unrecognized
+    // No match at all falls back to "Other" — a deliberate, safe bucket, so
+    // 'exact' confidence just like the account fallback above.
+    const resolvedCategoryConfidence: MatchConfidence = categoryMatch?.confidence ?? 'exact'
 
     const note = !category && categoryPhrase ? properCase(categoryPhrase) : undefined
     const categoryLabel = note ? `${resolvedCategory.name} ("${note}")` : resolvedCategory.name
@@ -618,9 +707,58 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
       raw,
       accountPhrase,
       categoryPhrase,
+      accountConfidence: resolvedAccountConfidence,
+      categoryConfidence: resolvedCategoryConfidence,
       summary: `${kind === 'expense' ? 'Expense' : 'Income'} ₱${amount.toLocaleString()} · ${categoryLabel} · ${resolvedAccount.name}`,
     }
   }
 
   return unrecognized
+}
+
+/** The four fields a fuzzy match can land on — used by CommandBar to know
+ * which part(s) of a parsed command need confirmation before it's safe to
+ * execute/persist. */
+export type FuzzyField = 'accountId' | 'categoryId' | 'fromAccountId' | 'toAccountId'
+
+/** Which of a parsed command's resolved fields are 'fuzzy' — i.e. need user
+ * confirmation before the command is safe to execute/persist. Exact/alias
+ * matches and deliberate fallbacks (default account, "Other" category) are
+ * excluded, since those already execute immediately today. */
+export function getFuzzyFields(cmd: ParsedCommand): FuzzyField[] {
+  const fields: FuzzyField[] = []
+  if (cmd.accountId !== undefined && cmd.accountConfidence === 'fuzzy') fields.push('accountId')
+  if (cmd.categoryId !== undefined && cmd.categoryConfidence === 'fuzzy') fields.push('categoryId')
+  if (cmd.fromAccountId !== undefined && cmd.fromAccountConfidence === 'fuzzy') fields.push('fromAccountId')
+  if (cmd.toAccountId !== undefined && cmd.toAccountConfidence === 'fuzzy') fields.push('toAccountId')
+  return fields
+}
+
+/** Convenience wrapper around `getFuzzyFields` for a simple yes/no gate. */
+export function hasLowConfidenceMatch(cmd: ParsedCommand): boolean {
+  return getFuzzyFields(cmd).length > 0
+}
+
+/** The entity id currently guessed for a given field. */
+export function fuzzyFieldEntityId(cmd: ParsedCommand, field: FuzzyField): number | undefined {
+  return cmd[field]
+}
+
+/** The phrase originally typed for a given fuzzy field, and the alias entity
+ * type it belongs to — used to save a CommandAlias once the user confirms or
+ * corrects that field. */
+export function fuzzyFieldPhrase(
+  cmd: ParsedCommand,
+  field: FuzzyField,
+): { phrase: string; entityType: CommandAlias['entityType'] } | undefined {
+  const phrase =
+    field === 'accountId'
+      ? cmd.accountPhrase
+      : field === 'categoryId'
+        ? cmd.categoryPhrase
+        : field === 'fromAccountId'
+          ? cmd.fromAccountPhrase
+          : cmd.toAccountPhrase
+  const entityType: CommandAlias['entityType'] = field === 'categoryId' ? 'category' : 'account'
+  return phrase ? { phrase, entityType } : undefined
 }

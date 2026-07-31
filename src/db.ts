@@ -170,6 +170,49 @@ export async function saveCommandAlias(
   }
 }
 
+/** Patches an existing transaction (amount, category, date, note, etc.). */
+export async function updateTransaction(
+  id: number,
+  patch: Partial<Omit<Transaction, 'id'>>,
+): Promise<void> {
+  await db.transactions.update(id, patch)
+}
+
+/** Permanently removes a single transaction. */
+export async function deleteTransaction(id: number): Promise<void> {
+  await db.transactions.delete(id)
+}
+
+/** Renames an account. Throws if the new name is blank. */
+export async function renameAccount(id: number, newName: string): Promise<void> {
+  const trimmed = newName.trim()
+  if (!trimmed) {
+    throw new Error('Account name cannot be empty.')
+  }
+  await db.accounts.update(id, { name: trimmed })
+}
+
+/**
+ * Deletes an account, but only if nothing still references it. Cascading
+ * deletes would silently destroy transaction/transfer history, so instead we
+ * block the delete and tell the user to clear those out first — the
+ * simplest policy that can't lose data by surprise.
+ */
+export async function deleteAccount(id: number): Promise<void> {
+  const [transactionCount, transferCount] = await Promise.all([
+    db.transactions.where('accountId').equals(id).count(),
+    db.transfers.filter((t) => t.fromAccountId === id || t.toAccountId === id).count(),
+  ])
+
+  if (transactionCount > 0 || transferCount > 0) {
+    throw new Error(
+      'This account still has transactions or transfers. Delete or move those first, then delete the account.',
+    )
+  }
+
+  await db.accounts.delete(id)
+}
+
 export const BALANCE_ADJUSTMENT_CATEGORY = 'Balance Adjustment'
 
 export async function getOrCreateBalanceAdjustmentCategory(): Promise<Category> {

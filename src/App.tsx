@@ -11,6 +11,7 @@ import Accounts from './pages/Accounts'
 import Budgets from './pages/Budgets'
 import Bills from './pages/Bills'
 import Reports from './pages/Reports'
+import Settings from './pages/Settings'
 import { seedIfEmpty } from './db'
 
 const titles: Record<string, string> = {
@@ -20,6 +21,7 @@ const titles: Record<string, string> = {
   '/budgets': 'Budgets',
   '/bills': 'Bills & Payouts',
   '/reports': 'Reports',
+  '/settings': 'Settings',
 }
 
 function titleFor(pathname: string): string {
@@ -45,6 +47,7 @@ function App() {
             <Route path="/budgets" element={<PageTransition><Budgets /></PageTransition>} />
             <Route path="/bills" element={<PageTransition><Bills /></PageTransition>} />
             <Route path="/reports" element={<PageTransition><Reports /></PageTransition>} />
+            <Route path="/settings" element={<PageTransition><Settings /></PageTransition>} />
           </Routes>
         </AnimatePresence>
       </main>

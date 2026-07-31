@@ -1,0 +1,266 @@
+import { describe, expect, it } from 'vitest'
+import type { Account, Category, CommandAlias, PayoutDate, PayoutSchedule } from '../db'
+import {
+  fuzzyFieldEntityId,
+  fuzzyFieldPhrase,
+  getFuzzyFields,
+  hasLowConfidenceMatch,
+  parseCommand,
+  type ParseContext,
+} from './commandParser'
+
+const GCASH = 1
+const GOTYME = 2
+const LANDBANK = 3
+const CASH = 4
+
+const SALARY = 1
+const OTHER_INCOME = 2
+const GROCERIES = 3
+const RENT = 4
+const UTILITIES = 5
+const TRANSPORT = 6
+const DINING = 7
+const SUBSCRIPTIONS = 8
+const OTHER_EXPENSE = 9
+
+const accounts: Account[] = [
+  { id: GCASH, name: 'GCash', type: 'checking', startingBalance: 0, createdAt: '' },
+  { id: GOTYME, name: 'GoTyme', type: 'checking', startingBalance: 0, createdAt: '' },
+  { id: LANDBANK, name: 'Landbank', type: 'checking', startingBalance: 0, createdAt: '' },
+  { id: CASH, name: 'Cash', type: 'cash', startingBalance: 0, createdAt: '' },
+]
+
+const categories: Category[] = [
+  { id: SALARY, name: 'Salary', kind: 'income', color: '#0f0' },
+  { id: OTHER_INCOME, name: 'Other Income', kind: 'income', color: '#0f0' },
+  { id: GROCERIES, name: 'Groceries', kind: 'expense', color: '#f00' },
+  { id: RENT, name: 'Rent', kind: 'expense', color: '#f00' },
+  { id: UTILITIES, name: 'Utilities', kind: 'expense', color: '#f00' },
+  { id: TRANSPORT, name: 'Transport', kind: 'expense', color: '#f00' },
+  { id: DINING, name: 'Dining', kind: 'expense', color: '#f00' },
+  { id: SUBSCRIPTIONS, name: 'Subscriptions', kind: 'expense', color: '#f00' },
+  { id: OTHER_EXPENSE, name: 'Other Expense', kind: 'expense', color: '#f00' },
+]
+
+const baseCtx: ParseContext = { accounts, categories, aliases: [], defaultAccountId: GCASH }
+
+describe('parseCommand — expense/income/transfer routing', () => {
+  it('parses a basic expense with account and category resolved', () => {
+    const cmd = parseCommand('expense 200 groceries gcash', baseCtx)
+    expect(cmd.type).toBe('expense')
+    expect(cmd.amount).toBe(200)
+    expect(cmd.accountId).toBe(GCASH)
+    expect(cmd.categoryId).toBe(GROCERIES)
+    expect(cmd.categoryConfidence).toBe('exact')
+  })
+
+  it('parses a basic income', () => {
+    const cmd = parseCommand('received 5000 salary gotyme', baseCtx)
+    expect(cmd.type).toBe('income')
+    expect(cmd.amount).toBe(5000)
+    expect(cmd.accountId).toBe(GOTYME)
+    expect(cmd.categoryId).toBe(SALARY)
+  })
+
+  it('parses a transfer between two accounts', () => {
+    const cmd = parseCommand('transfer 500 from gcash to gotyme', baseCtx)
+    expect(cmd.type).toBe('transfer')
+    expect(cmd.amount).toBe(500)
+    expect(cmd.fromAccountId).toBe(GCASH)
+    expect(cmd.toAccountId).toBe(GOTYME)
+  })
+
+  it('rejects a transfer with no destination instead of misfiling it as an expense', () => {
+    const cmd = parseCommand('transfer 500 gcash', baseCtx)
+    expect(cmd.type).toBe('unrecognized')
+    expect(cmd.summary).toContain('Missing destination')
+  })
+
+  it('rejects a transfer where both sides resolve to the same account', () => {
+    const cmd = parseCommand('transfer 500 gcash to gcash', baseCtx)
+    expect(cmd.type).toBe('unrecognized')
+  })
+
+  it('parses amounts with thousands separators', () => {
+    const cmd = parseCommand('spent 1,200 on groceries gcash', baseCtx)
+    expect(cmd.type).toBe('expense')
+    expect(cmd.amount).toBe(1200)
+  })
+})
+
+describe('parseCommand — "got paid" vs "paid" ambiguity', () => {
+  it('treats "got paid" as income, not an expense', () => {
+    const cmd = parseCommand('got paid 20000 salary gotyme', baseCtx)
+    expect(cmd.type).toBe('income')
+    expect(cmd.categoryId).toBe(SALARY)
+  })
+
+  it('treats bare "paid" as an expense trigger', () => {
+    const cmd = parseCommand('paid 500 rent gcash', baseCtx)
+    expect(cmd.type).toBe('expense')
+    expect(cmd.categoryId).toBe(RENT)
+  })
+})
+
+describe('parseCommand — "salary" as both trigger word and category name', () => {
+  it('routes to income and still resolves the Salary category from the same word', () => {
+    const cmd = parseCommand('salary 20000', baseCtx)
+    expect(cmd.type).toBe('income')
+    expect(cmd.categoryId).toBe(SALARY)
+    expect(cmd.categoryConfidence).toBe('exact')
+    expect(cmd.accountId).toBe(GCASH) // falls back to defaultAccountId
+  })
+})
+
+describe('parseCommand — fuzzy matching on short category names', () => {
+  it('fuzzy-matches a typo\'d short category name and marks it low-confidence', () => {
+    const cmd = parseCommand('expense 100 rnt cash', baseCtx)
+    expect(cmd.type).toBe('expense')
+    expect(cmd.categoryId).toBe(RENT)
+    expect(cmd.categoryConfidence).toBe('fuzzy')
+    expect(cmd.accountId).toBe(CASH)
+  })
+
+  it('does not require confirmation for an exact category match', () => {
+    const cmd = parseCommand('expense 100 rent cash', baseCtx)
+    expect(cmd.categoryConfidence).toBe('exact')
+  })
+})
+
+describe('parseCommand — confidence / confirmation gate', () => {
+  it('flags a fuzzy-matched field via getFuzzyFields/hasLowConfidenceMatch', () => {
+    const cmd = parseCommand('expense 100 rnt cash', baseCtx)
+    expect(hasLowConfidenceMatch(cmd)).toBe(true)
+    const fields = getFuzzyFields(cmd)
+    expect(fields).toContain('categoryId')
+    expect(fuzzyFieldEntityId(cmd, 'categoryId')).toBe(RENT)
+    expect(fuzzyFieldPhrase(cmd, 'categoryId')).toEqual({ phrase: 'rnt', entityType: 'category' })
+  })
+
+  it('does not flag anything when every field resolved exactly', () => {
+    const cmd = parseCommand('expense 100 groceries gcash', baseCtx)
+    expect(hasLowConfidenceMatch(cmd)).toBe(false)
+    expect(getFuzzyFields(cmd)).toEqual([])
+  })
+
+  it('does not flag a deliberate fallback (default account, "Other" category) as low-confidence', () => {
+    // "xyz123" resolves to neither an account nor a category, so it falls
+    // back to the default account and "Other Expense" bucket — both
+    // deliberate, safe defaults, not guesses, so confidence stays 'exact'.
+    const cmd = parseCommand('expense 100 xyz123', baseCtx)
+    expect(cmd.categoryId).toBe(OTHER_EXPENSE)
+    expect(cmd.categoryConfidence).toBe('exact')
+    expect(hasLowConfidenceMatch(cmd)).toBe(false)
+  })
+})
+
+describe('parseCommand — addRecurringBill', () => {
+  it('parses a recurring bill with due day and lexicon category match', () => {
+    const cmd = parseCommand('add bill netflix 149 due 15', baseCtx)
+    expect(cmd.type).toBe('addRecurringBill')
+    expect(cmd.amount).toBe(149)
+    expect(cmd.dueDay).toBe(15)
+    expect(cmd.categoryId).toBe(SUBSCRIPTIONS)
+    expect(cmd.billName).toBe('Netflix')
+    expect(cmd.accountId).toBe(GCASH) // default account fallback
+  })
+
+  it('clamps an out-of-range due day into 1-31', () => {
+    const tooHigh = parseCommand('add bill rent 8000 due 45 landbank', baseCtx)
+    expect(tooHigh.dueDay).toBe(31)
+  })
+
+  it('defaults due day to 1 when none is specified', () => {
+    const cmd = parseCommand('add bill rent 8000 landbank', baseCtx)
+    expect(cmd.dueDay).toBe(1)
+  })
+})
+
+describe('parseCommand — addPayoutSchedule', () => {
+  it('resolves the account and lexicon-matched category for a new schedule', () => {
+    const cmd = parseCommand('add payout schedule bonus gotyme', baseCtx)
+    expect(cmd.type).toBe('addPayoutSchedule')
+    expect(cmd.accountId).toBe(GOTYME)
+    expect(cmd.categoryId).toBe(OTHER_INCOME)
+    expect(cmd.scheduleLabel).toBe('Bonus')
+  })
+})
+
+describe('parseCommand — logPayout', () => {
+  const schedules: PayoutSchedule[] = [{ id: 1, label: 'Salary', accountId: GCASH, categoryId: SALARY, active: true }]
+  const payoutDates: PayoutDate[] = [
+    { id: 1, scheduleId: 1, date: '2020-01-01' }, // always in the past
+  ]
+
+  it('fulfills the next pending payout date', () => {
+    const cmd = parseCommand('log payout 20000 gotyme', { ...baseCtx, payoutSchedules: schedules, payoutDates })
+    expect(cmd.type).toBe('logPayout')
+    expect(cmd.amount).toBe(20000)
+    expect(cmd.categoryId).toBe(SALARY)
+    expect(cmd.categoryConfidence).toBe('exact')
+    expect(cmd.payoutDateId).toBe(1)
+    expect(cmd.accountId).toBe(GOTYME)
+  })
+
+  it('falls back to the schedule\'s own account when none is named', () => {
+    const cmd = parseCommand('log payout 20000', { ...baseCtx, payoutSchedules: schedules, payoutDates })
+    expect(cmd.accountId).toBe(GCASH)
+  })
+
+  it('reports there is nothing pending when every payout date is already logged', () => {
+    const loggedDates: PayoutDate[] = [{ id: 1, scheduleId: 1, date: '2020-01-01', loggedTransactionId: 5 }]
+    const cmd = parseCommand('log payout 20000', { ...baseCtx, payoutSchedules: schedules, payoutDates: loggedDates })
+    expect(cmd.type).toBe('unrecognized')
+    expect(cmd.summary).toContain('No pending payout to log right now.')
+  })
+
+  it('reports there is nothing pending when there are no schedules at all', () => {
+    const cmd = parseCommand('log payout 20000', baseCtx)
+    expect(cmd.type).toBe('unrecognized')
+  })
+})
+
+describe('parseCommand — query routing', () => {
+  it('routes a spending question to a query', () => {
+    const cmd = parseCommand('how much can I spend on dining', baseCtx)
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toContain('Dining')
+  })
+
+  it('routes a purchase-advice question to a query', () => {
+    const cmd = parseCommand('should i buy a 500 phone case', baseCtx)
+    expect(cmd.type).toBe('query')
+  })
+
+  it('routes a budget-health question to a query', () => {
+    const cmd = parseCommand("how's my budget?", baseCtx)
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toContain('No income logged yet this month')
+  })
+
+  it('does not let a real "set budget" command fall through to the query branch', () => {
+    const cmd = parseCommand('budget for dining 3000', baseCtx)
+    expect(cmd.type).toBe('setBudget')
+    expect(cmd.categoryId).toBe(DINING)
+    expect(cmd.amount).toBe(3000)
+  })
+})
+
+describe('parseCommand — unrecognized fallback', () => {
+  it('returns unrecognized for gibberish with no amount or trigger words', () => {
+    const cmd = parseCommand('asdkjaskdj qqqq', baseCtx)
+    expect(cmd.type).toBe('unrecognized')
+  })
+})
+
+describe('parseCommand — learned aliases', () => {
+  it('prefers a learned CommandAlias over the built-in lexicon match', () => {
+    // "jeep" is a built-in Transport lexicon keyword, but a learned alias
+    // remapping it to Dining should win — aliases are checked first.
+    const aliases: CommandAlias[] = [{ id: 1, phrase: 'jeep', entityType: 'category', entityId: DINING }]
+    const cmd = parseCommand('expense 50 jeep gcash', { ...baseCtx, aliases })
+    expect(cmd.categoryId).toBe(DINING)
+    expect(cmd.categoryConfidence).toBe('exact')
+  })
+})

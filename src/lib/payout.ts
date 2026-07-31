@@ -21,3 +21,14 @@ export function getPendingPayoutDates(
     .map((pd) => ({ payoutDate: pd, schedule: activeSchedulesById.get(pd.scheduleId)! }))
     .sort((a, b) => a.payoutDate.date.localeCompare(b.payoutDate.date))
 }
+
+/** The single next pending payout to fulfill (earliest due date), or
+ * `undefined` if there isn't one — used by "log payout ..." to find the
+ * specific PayoutDate a logged amount should be tied to. */
+export function getNextPendingPayout(
+  schedules: PayoutSchedule[],
+  payoutDates: PayoutDate[],
+  today: Date = new Date(),
+): PendingPayout | undefined {
+  return getPendingPayoutDates(schedules, payoutDates, today)[0]
+}
