@@ -1,5 +1,17 @@
-import type { Account, Budget, Category, CommandAlias, PayoutDate, PayoutSchedule, Transaction, Transfer } from '../db'
-import { todayISO } from './dates'
+import type {
+  Account,
+  Budget,
+  Category,
+  CommandAlias,
+  PayoutDate,
+  PayoutSchedule,
+  RecurringBill,
+  Transaction,
+  Transfer,
+} from '../db'
+import { parseISODate, todayISO } from './dates'
+import { signedAmount } from './finance'
+import { formatMoney } from './format'
 import { CATEGORY_KEYWORDS } from './categoryLexicon'
 import { buildFinancialContext, composeBudgetHealthCheck, composeLocalAnswer, composePurchaseAdvice } from './financialContext'
 import { getNextPendingPayout } from './payout'
@@ -14,6 +26,10 @@ export type ParsedCommandType =
   | 'addRecurringBill'
   | 'addPayoutSchedule'
   | 'logPayout'
+  | 'deleteTransaction'
+  | 'editTransaction'
+  | 'deleteBill'
+  | 'deleteBudget'
   | 'query'
   | 'unrecognized'
 
@@ -46,6 +62,23 @@ export interface ParsedCommand {
   scheduleLabel?: string
   /** type 'logPayout' — the specific pending PayoutDate row being fulfilled. */
   payoutDateId?: number
+  /** type 'deleteTransaction' | 'editTransaction' — the specific transaction
+   * identified (by recency, optionally filtered by category/account) as the
+   * target. accountId/categoryId/*Confidence/*Phrase above double as the
+   * *filter* used to find it (reusing the same fuzzy-confirmation gate as
+   * every other command), not the transaction's own fields. */
+  transactionId?: number
+  /** type 'editTransaction' — the new value(s) to apply. Only the field(s)
+   * actually mentioned are set; executeCommand only patches those. */
+  newAmount?: number
+  newCategoryId?: number
+  newCategoryConfidence?: MatchConfidence
+  newAccountId?: number
+  newAccountConfidence?: MatchConfidence
+  /** type 'deleteBill' */
+  billId?: number
+  /** type 'deleteBudget' */
+  budgetId?: number
   date: string
   summary: string
   raw: string
@@ -302,6 +335,111 @@ function extractAmount(text: string): { amount: number | undefined; rest: string
   return { amount, rest }
 }
 
+// Most-recent-first transactions, capped so "last transaction"/"last <x>
+// expense" style lookups don't have to rescan an unbounded history — recency
+// is all that matters for finding a target, so anything older than this is
+// assumed to not be what "last" refers to.
+const RECENT_TRANSACTION_LIMIT = 50
+
+function recentTransactions(transactions: Transaction[]): Transaction[] {
+  return [...transactions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, RECENT_TRANSACTION_LIMIT)
+}
+
+/** The transaction identified as the target of a deleteTransaction/
+ * editTransaction command, plus whichever category/account filter (if any)
+ * was used to find it — carried through as the same accountId/categoryId
+ * fields (and confidences) every other command uses, so it plugs straight
+ * into the existing fuzzy-confirmation gate without any new machinery. */
+interface TransactionTarget {
+  transaction: Transaction
+  categoryId?: number
+  categoryConfidence?: MatchConfidence
+  categoryPhrase?: string
+  accountId?: number
+  accountConfidence?: MatchConfidence
+  accountPhrase?: string
+}
+
+/** Finds the most recent transaction matching an optional free-text filter
+ * (a mentioned category and/or account — e.g. "groceries", "gcash", or both
+ * words together). Returns a `reason` instead of a `target` whenever nothing
+ * can be found, so the caller can surface a specific message rather than a
+ * generic parse failure.
+ *
+ * Note: if the filter term only resolves 'fuzzy' and the user later taps
+ * "Fix" in the confirmation UI, the override only changes which
+ * account/category is *reported* for execution — it does not re-run this
+ * lookup against the corrected entity. That's an accepted simplification
+ * (matching how fuzzy corrections already work for every other command):
+ * the mandatory destructive-action preview shows the actual resolved
+ * transaction before anything executes, so a wrong guess is still caught,
+ * just by "Cancel and retype" rather than "Fix". */
+function findTransactionTarget(
+  filterPhrase: string,
+  ctx: ParseContext,
+  aliases: CommandAlias[],
+): { target?: TransactionTarget; reason?: string } {
+  const pool = recentTransactions(ctx.transactions ?? [])
+  if (pool.length === 0) return { reason: 'No transactions yet.' }
+
+  let categoryId: number | undefined
+  let categoryConfidence: MatchConfidence | undefined
+  let categoryName: string | undefined
+  let accountId: number | undefined
+  let accountConfidence: MatchConfidence | undefined
+  let accountName: string | undefined
+
+  if (filterPhrase) {
+    const categoryMatch = resolveCategory(filterPhrase, ctx.categories, aliases)
+    if (categoryMatch) {
+      categoryId = categoryMatch.entity.id
+      categoryConfidence = categoryMatch.confidence
+      categoryName = categoryMatch.entity.name
+    }
+    const accountMatch = resolveAccount(filterPhrase, ctx.accounts, aliases)
+    if (accountMatch) {
+      accountId = accountMatch.entity.id
+      accountConfidence = accountMatch.confidence
+      accountName = accountMatch.entity.name
+    }
+    if (categoryId === undefined && accountId === undefined) {
+      return { reason: `Couldn't tell which transaction — "${filterPhrase}" isn't a known category or account.` }
+    }
+  }
+
+  const match = pool.find(
+    (t) =>
+      (categoryId === undefined || t.categoryId === categoryId) &&
+      (accountId === undefined || t.accountId === accountId),
+  )
+  if (!match) {
+    const what = [categoryName, accountName].filter(Boolean).join(' at ')
+    return { reason: what ? `No recent ${what} transaction found.` : 'No transactions yet.' }
+  }
+
+  return {
+    target: {
+      transaction: match,
+      categoryId,
+      categoryConfidence,
+      categoryPhrase: filterPhrase || undefined,
+      accountId,
+      accountConfidence,
+      accountPhrase: filterPhrase || undefined,
+    },
+  }
+}
+
+/** Short one-line description of a transaction for delete/edit confirmation
+ * summaries — e.g. "Jul 31 - Groceries -₱200.00 (GCash)". */
+function describeTransaction(t: Transaction, ctx: ParseContext): string {
+  const category = ctx.categories.find((c) => c.id === t.categoryId)
+  const account = ctx.accounts.find((a) => a.id === t.accountId)
+  const signed = category ? signedAmount(t.amount, category.kind) : t.amount
+  const dateLabel = parseISODate(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return `${dateLabel} - ${category?.name ?? 'Unknown'} ${formatMoney(signed)}${account ? ` (${account.name})` : ''}`
+}
+
 export interface ParseContext {
   accounts: Account[]
   categories: Category[]
@@ -317,6 +455,8 @@ export interface ParseContext {
   /** Needed only for "log payout ..." — to find the next pending PayoutDate. */
   payoutSchedules?: PayoutSchedule[]
   payoutDates?: PayoutDate[]
+  /** Needed only for "delete/remove bill ..." — to resolve the target bill by name. */
+  recurringBills?: RecurringBill[]
 }
 
 export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand {
@@ -439,6 +579,83 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
     }
   }
 
+  // Delete recurring bill: "remove bill netflix", "delete the netflix bill".
+  // Checked before the "add bill ..." block below — its trigger requires the
+  // string to start with add/create/new (or nothing) directly followed by
+  // "bill", so "delete"/"remove" never falls into it, but this is listed
+  // first anyway to keep the destructive commands grouped together.
+  if (/^(remove|delete)\b.*\bbill\b/.test(text)) {
+    const cleaned = text
+      .replace(/^(remove|delete)\b/, ' ')
+      .replace(/\bthe\b/g, ' ')
+      .replace(/\b(recurring\s+)?bill\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!cleaned) {
+      return { type: 'unrecognized', date, raw, summary: 'Which bill? Try "delete bill netflix".' }
+    }
+
+    const bills = ctx.recurringBills ?? []
+    if (bills.length === 0) {
+      return { type: 'unrecognized', date, raw, summary: 'No recurring bills set up yet.' }
+    }
+    const match = fuzzyFind(cleaned, bills)
+    if (!match) {
+      return {
+        type: 'unrecognized',
+        date,
+        raw,
+        summary: `No bill named "${properCase(cleaned)}" found to delete.`,
+      }
+    }
+    const bill = match.entity
+    return {
+      type: 'deleteBill',
+      billId: bill.id,
+      date,
+      raw,
+      summary: `Delete bill: ${bill.name} (₱${bill.amount.toLocaleString()}, due day ${bill.dueDay})?`,
+    }
+  }
+
+  // Delete budget: "remove budget dining", "clear budget for groceries".
+  // Checked before "set budget ..." below — that trigger requires an
+  // optional "set "/"add " prefix directly followed by "budget", so
+  // remove/delete/clear never match it, but again grouped here with the
+  // other destructive commands for clarity.
+  if (/^(remove|delete|clear)\s+budget\b/.test(text)) {
+    const cleaned = text
+      .replace(/^(remove|delete|clear)\b/, ' ')
+      .replace(/\bbudget\b/g, ' ')
+      .replace(/\bfor\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!cleaned) {
+      return { type: 'unrecognized', date, raw, summary: 'Which budget? Try "clear budget dining".' }
+    }
+
+    const categoryMatch = resolveCategory(cleaned, expenseCategories, aliases)
+    if (!categoryMatch) {
+      return { type: 'unrecognized', date, raw, summary: `"${properCase(cleaned)}" isn't a known category.` }
+    }
+    const { entity: category, confidence: categoryConfidence } = categoryMatch
+    const budget = (ctx.budgets ?? []).find((b) => b.categoryId === category.id)
+    if (!budget) {
+      return { type: 'unrecognized', date, raw, summary: `No budget set for ${category.name} to clear.` }
+    }
+
+    return {
+      type: 'deleteBudget',
+      budgetId: budget.id,
+      categoryId: category.id,
+      categoryConfidence,
+      categoryPhrase: cleaned,
+      date,
+      raw,
+      summary: `Clear budget: ${category.name} (₱${budget.monthlyLimit.toLocaleString()}/mo)?`,
+    }
+  }
+
   // Add recurring bill: "add bill netflix 149 due 15", "recurring bill rent
   // 8000 due 1 landbank". Same account/category resolution as expense
   // parsing, reusing the leftover phrase as both the bill's display name and
@@ -521,6 +738,142 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
       date,
       raw,
       summary: `Set ${category.name} budget to ₱${amount.toLocaleString()}/month`,
+    }
+  }
+
+  // Delete/edit an existing transaction: "delete last transaction", "undo
+  // last groceries expense", "remove last transaction at gcash", "change
+  // last transaction to 150", "fix last transaction category to dining",
+  // "move last transaction to gotyme". Both triggers are anchored (^) and
+  // require both "last" and a transaction-ish word somewhere in the string,
+  // so this can't misfire on an unrelated sentence that happens to start
+  // with "change"/"move"/etc. Checked before the transfer block below, which
+  // would otherwise swallow "move last transaction to gcash" via its bare
+  // "move" trigger.
+  const TX_TARGET_WORD_RE = /\b(transaction|expense|income|payment|purchase|entry)\b/
+  const isDeleteTxCmd = /^(delete|remove|undo)\b/.test(text) && /\blast\b/.test(text) && TX_TARGET_WORD_RE.test(text)
+  const isEditTxCmd =
+    /^(change|edit|fix|update|move)\b/.test(text) && /\blast\b/.test(text) && TX_TARGET_WORD_RE.test(text)
+
+  if (isDeleteTxCmd) {
+    const filterPhrase = text
+      .replace(/^(delete|remove|undo)\b/, ' ')
+      .replace(/\blast\b/, ' ')
+      .replace(/\b(transaction|expense|income|payment|purchase|entry)\b/g, ' ')
+      .replace(/\b(at|my|the)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    const { target, reason } = findTransactionTarget(filterPhrase, ctx, aliases)
+    if (!target) {
+      return { type: 'unrecognized', date, raw, summary: reason ?? "Couldn't find a transaction to delete." }
+    }
+
+    return {
+      type: 'deleteTransaction',
+      transactionId: target.transaction.id,
+      categoryId: target.categoryId,
+      categoryConfidence: target.categoryConfidence,
+      categoryPhrase: target.categoryPhrase,
+      accountId: target.accountId,
+      accountConfidence: target.accountConfidence,
+      accountPhrase: target.accountPhrase,
+      date,
+      raw,
+      summary: `Delete: ${describeTransaction(target.transaction, ctx)}?`,
+    }
+  }
+
+  if (isEditTxCmd) {
+    if (!/\bto\b/.test(text)) {
+      return {
+        type: 'unrecognized',
+        date,
+        raw,
+        summary: 'Missing new value — try "change last transaction to 150".',
+      }
+    }
+
+    const [beforePartRaw, afterPartRaw] = text.split(/\bto\b/)
+    const beforePart = beforePartRaw ?? ''
+    const afterPart = (afterPartRaw ?? '').trim()
+    if (!afterPart) {
+      return {
+        type: 'unrecognized',
+        date,
+        raw,
+        summary: 'Missing new value — try "change last transaction to 150".',
+      }
+    }
+    const wantsCategoryChange = /\bcategory\b/.test(text)
+
+    const filterPhrase = beforePart
+      .replace(/^(change|edit|fix|update|move)\b/, ' ')
+      .replace(/\blast\b/, ' ')
+      .replace(/\b(transaction|expense|income|payment|purchase|entry|category)\b/g, ' ')
+      .replace(/\b(at|my|the)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    const { target, reason } = findTransactionTarget(filterPhrase, ctx, aliases)
+    if (!target) {
+      return { type: 'unrecognized', date, raw, summary: reason ?? "Couldn't find a transaction to edit." }
+    }
+
+    const baseFields = {
+      transactionId: target.transaction.id,
+      categoryId: target.categoryId,
+      categoryConfidence: target.categoryConfidence,
+      categoryPhrase: target.categoryPhrase,
+      accountId: target.accountId,
+      accountConfidence: target.accountConfidence,
+      accountPhrase: target.accountPhrase,
+      date,
+      raw,
+    }
+
+    if (wantsCategoryChange) {
+      const newCategoryMatch = resolveCategory(afterPart, ctx.categories, aliases)
+      if (!newCategoryMatch) {
+        return { type: 'unrecognized', date, raw, summary: `"${afterPart}" isn't a known category.` }
+      }
+      return {
+        ...baseFields,
+        type: 'editTransaction',
+        newCategoryId: newCategoryMatch.entity.id,
+        newCategoryConfidence: newCategoryMatch.confidence,
+        summary: `Change: ${describeTransaction(target.transaction, ctx)} → category ${newCategoryMatch.entity.name}?`,
+      }
+    }
+
+    const { amount: newAmount } = extractAmount(afterPart)
+    if (newAmount !== undefined) {
+      const category = ctx.categories.find((c) => c.id === target.transaction.categoryId)
+      const newSigned = category ? signedAmount(newAmount, category.kind) : newAmount
+      return {
+        ...baseFields,
+        type: 'editTransaction',
+        newAmount,
+        summary: `Change: ${describeTransaction(target.transaction, ctx)} to ${formatMoney(newSigned)}?`,
+      }
+    }
+
+    // Not a number and not a category change — treat as "move to <account>".
+    const newAccountMatch = resolveAccount(afterPart, ctx.accounts, aliases)
+    if (!newAccountMatch) {
+      return {
+        type: 'unrecognized',
+        date,
+        raw,
+        summary: `"${afterPart}" isn't a known account, category, or amount.`,
+      }
+    }
+    return {
+      ...baseFields,
+      type: 'editTransaction',
+      newAccountId: newAccountMatch.entity.id,
+      newAccountConfidence: newAccountMatch.confidence,
+      summary: `Move: ${describeTransaction(target.transaction, ctx)} → ${newAccountMatch.entity.name}?`,
     }
   }
 

@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Sparkles, X, Check, Undo2, ArrowRight, Pencil, HelpCircle } from 'lucide-react'
-import db, { saveCommandAlias } from '../db'
+import { Sparkles, X, Check, Undo2, ArrowRight, Pencil, HelpCircle, AlertTriangle } from 'lucide-react'
+import db, { saveCommandAlias, type Category } from '../db'
 import {
   parseCommand,
   getFuzzyFields,
   fuzzyFieldPhrase,
   type ParsedCommand,
+  type ParsedCommandType,
   type FuzzyField,
 } from '../lib/commandParser'
 import { executeCommand, type ExecutionResult } from '../lib/commandExecutor'
@@ -15,10 +16,44 @@ import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import PickerGrid from './PickerGrid'
 import { tapScale } from '../lib/motion'
 
-// Which category "kind" a fuzzy categoryId belongs to, per command type — so
-// the correction picker offers the right list (income vs expense).
-function categoryKindFor(cmd: ParsedCommand): 'income' | 'expense' {
+// Which category "kind" a fuzzy categoryId belongs to — used to pick the
+// right list (income vs expense) for the correction picker. Prefers the
+// actual matched category's own kind when there is one (e.g. the filter
+// category on a deleteTransaction/editTransaction command could be either
+// kind), falling back to a per-type guess only when no category was
+// resolved at all.
+function categoryKindFor(cmd: ParsedCommand, categories: Category[]): 'income' | 'expense' {
+  if (cmd.categoryId !== undefined) {
+    const match = categories.find((c) => c.id === cmd.categoryId)
+    if (match) return match.kind
+  }
   return cmd.type === 'income' || cmd.type === 'addPayoutSchedule' ? 'income' : 'expense'
+}
+
+// These four are destructive (delete or overwrite existing data) — unlike
+// every other command type, they always require an explicit "yes, do it"
+// tap before Execute is enabled, even when every resolved field is
+// high-confidence. See the destructiveConfirmed gate below.
+const DESTRUCTIVE_TYPES = new Set<ParsedCommandType>([
+  'deleteTransaction',
+  'editTransaction',
+  'deleteBill',
+  'deleteBudget',
+])
+
+function destructiveConfirmLabel(type: ParsedCommandType): string {
+  switch (type) {
+    case 'deleteTransaction':
+      return 'Yes, delete it'
+    case 'editTransaction':
+      return 'Yes, make this change'
+    case 'deleteBill':
+      return 'Yes, delete this bill'
+    case 'deleteBudget':
+      return 'Yes, clear this budget'
+    default:
+      return 'Yes, confirm'
+  }
 }
 
 function fuzzyFieldLabel(field: FuzzyField): string {
@@ -56,6 +91,9 @@ const EXAMPLES = [
   'budget dining 3000',
   'add bill netflix 149 due 15',
   'how much can i spend on dining',
+  'delete last transaction',
+  'undo last groceries expense',
+  'clear budget dining',
 ]
 
 export default function CommandBar() {
@@ -73,10 +111,17 @@ export default function CommandBar() {
   const [fuzzyOverrides, setFuzzyOverrides] = useState<Partial<Record<FuzzyField, number>>>({})
   const [correctingField, setCorrectingField] = useState<FuzzyField | null>(null)
 
+  // Destructive commands (delete/edit transaction, delete bill, delete
+  // budget) always need an explicit "yes, do it" tap before Execute unlocks
+  // — separate from, and in addition to, the fuzzy-field gate above. Reset
+  // alongside it whenever the input text changes.
+  const [destructiveConfirmed, setDestructiveConfirmed] = useState(false)
+
   function resetFuzzyGate() {
     setConfirmedFuzzyFields(new Set())
     setFuzzyOverrides({})
     setCorrectingField(null)
+    setDestructiveConfirmed(false)
   }
 
   const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
@@ -85,6 +130,7 @@ export default function CommandBar() {
   const transactions = useLiveQuery(() => db.transactions.toArray(), [], [])
   const transfers = useLiveQuery(() => db.transfers.toArray(), [], [])
   const budgets = useLiveQuery(() => db.budgets.toArray(), [], [])
+  const recurringBills = useLiveQuery(() => db.recurringBills.toArray(), [], [])
   const payoutSchedules = useLiveQuery(() => db.payoutSchedules.toArray(), [], [])
   const payoutDates = useLiveQuery(() => db.payoutDates.toArray(), [], [])
   const fixedTransaction = useLiveQuery(
@@ -120,10 +166,23 @@ export default function CommandBar() {
       budgets: budgets ?? [],
       transactions: transactions ?? [],
       transfers: transfers ?? [],
+      recurringBills: recurringBills ?? [],
       payoutSchedules: payoutSchedules ?? [],
       payoutDates: payoutDates ?? [],
     })
-  }, [text, accounts, categories, aliases, defaultAccountId, budgets, transactions, transfers, payoutSchedules, payoutDates])
+  }, [
+    text,
+    accounts,
+    categories,
+    aliases,
+    defaultAccountId,
+    budgets,
+    transactions,
+    transfers,
+    recurringBills,
+    payoutSchedules,
+    payoutDates,
+  ])
 
   // Fields on the current parsed command whose match is a low-confidence
   // (Levenshtein) guess — these need an explicit "yes"/correction before
@@ -133,6 +192,11 @@ export default function CommandBar() {
     () => fuzzyFields.filter((f) => !confirmedFuzzyFields.has(f) && fuzzyOverrides[f] === undefined),
     [fuzzyFields, confirmedFuzzyFields, fuzzyOverrides],
   )
+
+  // Destructive commands need their own explicit confirmation regardless of
+  // field confidence — see DESTRUCTIVE_TYPES.
+  const isDestructive = parsed !== null && DESTRUCTIVE_TYPES.has(parsed.type)
+  const needsDestructiveConfirm = isDestructive && !destructiveConfirmed
 
   // The command actually sent to executeCommand — the parser's guess for any
   // fuzzy field the user corrected via the inline picker, left as-is
@@ -160,7 +224,7 @@ export default function CommandBar() {
 
   async function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault()
-    if (!effectiveCommand || busy || pendingFuzzyFields.length > 0) return
+    if (!effectiveCommand || busy || pendingFuzzyFields.length > 0 || needsDestructiveConfirm) return
     setBusy(true)
     const res = await executeCommand(effectiveCommand)
     setBusy(false)
@@ -234,7 +298,7 @@ export default function CommandBar() {
       <motion.button
         {...tapScale}
         onClick={openBar}
-        className="absolute bottom-20 right-4 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-900/30"
+        className="absolute bottom-6 right-4 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-900/30"
         aria-label="Quick command"
       >
         <Sparkles size={20} />
@@ -279,9 +343,11 @@ export default function CommandBar() {
                     title={fuzzyFieldPickerTitle(correctingField)}
                     items={
                       correctingField === 'categoryId'
-                        ? (parsed && categoryKindFor(parsed) === 'income' ? incomeCategories : expenseCategories).map(
-                            (c) => ({ id: c.id, label: c.name, dotColor: c.color }),
-                          )
+                        ? (
+                            parsed && categoryKindFor(parsed, categories ?? []) === 'income'
+                              ? incomeCategories
+                              : expenseCategories
+                          ).map((c) => ({ id: c.id, label: c.name, dotColor: c.color }))
                         : (accounts ?? []).map((a) => ({ id: a.id, label: a.name, icon: ACCOUNT_ICONS[a.type] }))
                     }
                     onPick={(id) => correctFuzzyField(correctingField, id)}
@@ -387,6 +453,35 @@ export default function CommandBar() {
                     )}
                   </AnimatePresence>
 
+                  {parsed && !result && isDestructive && !destructiveConfirmed && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-1.5 rounded-lg bg-red-50 px-3 py-2 text-sm dark:bg-red-950"
+                    >
+                      <p className="flex items-center gap-1.5 text-xs font-medium text-red-800 dark:text-red-200">
+                        <AlertTriangle size={13} className="shrink-0" />
+                        This deletes/changes existing data — please confirm.
+                      </p>
+                      <div className="flex gap-3 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setDestructiveConfirmed(true)}
+                          className="flex items-center gap-1 text-xs font-medium text-red-700 dark:text-red-300"
+                        >
+                          <Check size={12} /> {destructiveConfirmLabel(parsed.type)}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setText('')}
+                          className="text-xs font-medium text-slate-500 dark:text-slate-400"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
                   {parsed && !result && pendingFuzzyFields.length > 0 && (
                     <motion.div
                       initial={{ opacity: 0, y: -4 }}
@@ -433,12 +528,18 @@ export default function CommandBar() {
                   <motion.button
                     {...tapScale}
                     type="submit"
-                    disabled={!parsed || parsed.type === 'unrecognized' || busy || pendingFuzzyFields.length > 0}
+                    disabled={
+                      !parsed ||
+                      parsed.type === 'unrecognized' ||
+                      busy ||
+                      pendingFuzzyFields.length > 0 ||
+                      needsDestructiveConfirm
+                    }
                     className="w-full rounded-lg bg-indigo-600 py-3 font-medium text-white disabled:opacity-40"
                   >
                     {busy
                       ? 'Working…'
-                      : pendingFuzzyFields.length > 0
+                      : pendingFuzzyFields.length > 0 || needsDestructiveConfirm
                         ? 'Confirm above first'
                         : parsed?.type === 'query'
                           ? 'Ask'

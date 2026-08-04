@@ -1,4 +1,5 @@
-import db, { getOrCreateBalanceAdjustmentCategory } from '../db'
+import db, { deleteBudget, deleteRecurringBill, getOrCreateBalanceAdjustmentCategory } from '../db'
+import type { Transaction } from '../db'
 import type { ParsedCommand } from './commandParser'
 
 export interface ExecutionResult {
@@ -225,6 +226,100 @@ export async function executeCommand(cmd: ParsedCommand): Promise<ExecutionResul
         undo: async () => {
           await db.payoutDates.update(payoutDateId, { loggedTransactionId: undefined })
           await db.transactions.delete(id)
+        },
+      }
+    }
+
+    case 'deleteTransaction': {
+      if (cmd.transactionId === undefined) {
+        return { ok: false, message: "Couldn't figure out which transaction to delete." }
+      }
+      const transactionId = cmd.transactionId
+      const deleted = await db.transactions.get(transactionId)
+      if (!deleted) {
+        return { ok: false, message: 'That transaction no longer exists.' }
+      }
+      await db.transactions.delete(transactionId)
+      return {
+        ok: true,
+        message: cmd.summary,
+        undo: async () => {
+          // Re-inserts the exact row (same id and all), not a fresh add —
+          // Dexie allows an explicit primary key value on an auto-increment
+          // ('++id') table as long as it's free, which it is right after the
+          // delete above.
+          await db.transactions.add(deleted)
+        },
+      }
+    }
+
+    case 'editTransaction': {
+      if (cmd.transactionId === undefined) {
+        return { ok: false, message: "Couldn't figure out which transaction to edit." }
+      }
+      const transactionId = cmd.transactionId
+      const previous = await db.transactions.get(transactionId)
+      if (!previous) {
+        return { ok: false, message: 'That transaction no longer exists.' }
+      }
+
+      const patch: Partial<Omit<Transaction, 'id'>> = {}
+      if (cmd.newAmount !== undefined) patch.amount = cmd.newAmount
+      if (cmd.newCategoryId !== undefined) patch.categoryId = cmd.newCategoryId
+      if (cmd.newAccountId !== undefined) patch.accountId = cmd.newAccountId
+      if (Object.keys(patch).length === 0) {
+        return { ok: false, message: "Couldn't figure out what to change on that transaction." }
+      }
+
+      await db.transactions.update(transactionId, patch)
+      return {
+        ok: true,
+        message: cmd.summary,
+        transactionId,
+        undo: async () => {
+          await db.transactions.update(transactionId, {
+            amount: previous.amount,
+            categoryId: previous.categoryId,
+            accountId: previous.accountId,
+          })
+        },
+      }
+    }
+
+    case 'deleteBill': {
+      if (cmd.billId === undefined) {
+        return { ok: false, message: "Couldn't figure out which bill to delete." }
+      }
+      const billId = cmd.billId
+      const deleted = await db.recurringBills.get(billId)
+      if (!deleted) {
+        return { ok: false, message: 'That bill no longer exists.' }
+      }
+      await deleteRecurringBill(billId)
+      return {
+        ok: true,
+        message: cmd.summary,
+        undo: async () => {
+          await db.recurringBills.add(deleted)
+        },
+      }
+    }
+
+    case 'deleteBudget': {
+      if (cmd.budgetId === undefined) {
+        return { ok: false, message: "Couldn't figure out which budget to clear." }
+      }
+      const budgetId = cmd.budgetId
+      const deleted = await db.budgets.get(budgetId)
+      if (!deleted) {
+        return { ok: false, message: 'That budget no longer exists.' }
+      }
+      await deleteBudget(budgetId)
+      return {
+        ok: true,
+        message: cmd.summary,
+        undo: async () => {
+          await db.budgets.add(deleted)
         },
       }
     }

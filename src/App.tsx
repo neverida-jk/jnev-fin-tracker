@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
-import BottomNav from './components/BottomNav'
 import Header from './components/Header'
 import PageTransition from './components/PageTransition'
 import CommandBar from './components/CommandBar'
@@ -52,7 +51,6 @@ function App() {
         </AnimatePresence>
       </main>
       <CommandBar />
-      <BottomNav />
     </div>
   )
 }

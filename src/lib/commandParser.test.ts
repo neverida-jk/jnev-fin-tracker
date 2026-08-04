@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Account, Category, CommandAlias, PayoutDate, PayoutSchedule } from '../db'
+import type { Account, Budget, Category, CommandAlias, PayoutDate, PayoutSchedule, RecurringBill, Transaction } from '../db'
 import {
   fuzzyFieldEntityId,
   fuzzyFieldPhrase,
@@ -251,6 +251,144 @@ describe('parseCommand — unrecognized fallback', () => {
   it('returns unrecognized for gibberish with no amount or trigger words', () => {
     const cmd = parseCommand('asdkjaskdj qqqq', baseCtx)
     expect(cmd.type).toBe('unrecognized')
+  })
+})
+
+describe('parseCommand — deleteTransaction', () => {
+  const transactions: Transaction[] = [
+    {
+      id: 10,
+      accountId: GCASH,
+      categoryId: GROCERIES,
+      amount: 200,
+      date: '2026-07-30',
+      note: '',
+      createdAt: '2026-07-30T10:00:00.000Z',
+    },
+    {
+      id: 11,
+      accountId: GOTYME,
+      categoryId: DINING,
+      amount: 150,
+      date: '2026-07-31',
+      note: '',
+      createdAt: '2026-07-31T10:00:00.000Z',
+    },
+  ]
+
+  it('targets the single most recent transaction with no filter', () => {
+    const cmd = parseCommand('delete last transaction', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('deleteTransaction')
+    expect(cmd.transactionId).toBe(11)
+    expect(cmd.summary).toContain('Delete:')
+  })
+
+  it('filters the target by a mentioned category', () => {
+    const cmd = parseCommand('delete last groceries transaction', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('deleteTransaction')
+    expect(cmd.transactionId).toBe(10)
+    expect(cmd.categoryId).toBe(GROCERIES)
+  })
+
+  it('filters the target by a mentioned account', () => {
+    const cmd = parseCommand('undo last payment at gcash', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('deleteTransaction')
+    expect(cmd.transactionId).toBe(10)
+    expect(cmd.accountId).toBe(GCASH)
+  })
+
+  it('reports a specific reason when there are no transactions at all', () => {
+    const cmd = parseCommand('delete last transaction', baseCtx)
+    expect(cmd.type).toBe('unrecognized')
+    expect(cmd.summary).toContain('No transactions yet')
+  })
+
+  it('reports a specific reason when the filtered category has no transactions', () => {
+    const cmd = parseCommand('remove last rent transaction', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('unrecognized')
+    expect(cmd.summary).toContain('No recent')
+  })
+})
+
+describe('parseCommand — editTransaction', () => {
+  const transactions: Transaction[] = [
+    {
+      id: 10,
+      accountId: GCASH,
+      categoryId: GROCERIES,
+      amount: 200,
+      date: '2026-07-31',
+      note: '',
+      createdAt: '2026-07-31T10:00:00.000Z',
+    },
+  ]
+
+  it('changes the amount on the last transaction', () => {
+    const cmd = parseCommand('change last transaction to 150', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('editTransaction')
+    expect(cmd.transactionId).toBe(10)
+    expect(cmd.newAmount).toBe(150)
+  })
+
+  it('changes the category on the last transaction', () => {
+    const cmd = parseCommand('fix last transaction category to dining', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('editTransaction')
+    expect(cmd.transactionId).toBe(10)
+    expect(cmd.newCategoryId).toBe(DINING)
+  })
+
+  it('moves the last transaction to a different account', () => {
+    const cmd = parseCommand('move last transaction to gotyme', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('editTransaction')
+    expect(cmd.transactionId).toBe(10)
+    expect(cmd.newAccountId).toBe(GOTYME)
+  })
+
+  it('rejects an edit missing a new value', () => {
+    const cmd = parseCommand('change last transaction', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('unrecognized')
+  })
+})
+
+describe('parseCommand — deleteBill', () => {
+  const recurringBills: RecurringBill[] = [
+    { id: 1, name: 'Netflix', amount: 149, dueDay: 15, accountId: GCASH, categoryId: SUBSCRIPTIONS, active: true },
+  ]
+
+  it('resolves a bill to delete by name', () => {
+    const cmd = parseCommand('remove bill netflix', { ...baseCtx, recurringBills })
+    expect(cmd.type).toBe('deleteBill')
+    expect(cmd.billId).toBe(1)
+    expect(cmd.summary).toContain('Netflix')
+  })
+
+  it('resolves "delete the <name> bill" phrasing', () => {
+    const cmd = parseCommand('delete the netflix bill', { ...baseCtx, recurringBills })
+    expect(cmd.type).toBe('deleteBill')
+    expect(cmd.billId).toBe(1)
+  })
+
+  it('reports a specific reason when no bill matches', () => {
+    const cmd = parseCommand('delete bill spotify', { ...baseCtx, recurringBills })
+    expect(cmd.type).toBe('unrecognized')
+    expect(cmd.summary).toContain('No bill named')
+  })
+})
+
+describe('parseCommand — deleteBudget', () => {
+  const budgets: Budget[] = [{ id: 1, categoryId: DINING, monthlyLimit: 3000 }]
+
+  it('resolves a budget to clear by category', () => {
+    const cmd = parseCommand('clear budget dining', { ...baseCtx, budgets })
+    expect(cmd.type).toBe('deleteBudget')
+    expect(cmd.budgetId).toBe(1)
+    expect(cmd.summary).toContain('Dining')
+  })
+
+  it('reports a specific reason when the category has no budget set', () => {
+    const cmd = parseCommand('remove budget for groceries', { ...baseCtx, budgets })
+    expect(cmd.type).toBe('unrecognized')
+    expect(cmd.summary).toContain('No budget set')
   })
 })
 

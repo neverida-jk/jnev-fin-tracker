@@ -213,6 +213,25 @@ export async function deleteAccount(id: number): Promise<void> {
   await db.accounts.delete(id)
 }
 
+/**
+ * Deletes a recurring bill definition. Unlike an account, nothing else
+ * references a bill row (each paid instance becomes its own independent
+ * transaction), so — unlike deleteAccount — no referential-integrity guard
+ * is needed here.
+ */
+export async function deleteRecurringBill(id: number): Promise<void> {
+  await db.recurringBills.delete(id)
+}
+
+/**
+ * Deletes a budget's monthly limit for a category. Same reasoning as
+ * deleteRecurringBill: nothing else references a budget row, so this is a
+ * plain delete.
+ */
+export async function deleteBudget(id: number): Promise<void> {
+  await db.budgets.delete(id)
+}
+
 export const BALANCE_ADJUSTMENT_CATEGORY = 'Balance Adjustment'
 
 export async function getOrCreateBalanceAdjustmentCategory(): Promise<Category> {
