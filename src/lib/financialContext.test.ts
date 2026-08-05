@@ -3,11 +3,15 @@ import type { Account, Budget, Category, Transaction } from '../db'
 import {
   buildFinancialContext,
   composeBudgetHealthCheck,
+  composeBudgetPaceHighlight,
   composeLocalAnswer,
+  composePersonalizedHighlight,
   composePurchaseAdvice,
+  composeSpendingPaceHighlight,
   type FinancialContext,
 } from './financialContext'
 import { formatMoney } from './format'
+import type { MonthlyPoint } from './finance'
 
 const accounts: Account[] = [{ id: 1, name: 'GCash', type: 'checking', startingBalance: 1000, createdAt: '' }]
 
@@ -221,5 +225,126 @@ describe('composePurchaseAdvice', () => {
     const ctx = makeContext({ netWorth: 1000 })
     const answer = composePurchaseAdvice(ctx, 100)
     expect(answer).toContain("I don't have a specific budget to check that against")
+  })
+})
+
+describe('composeBudgetPaceHighlight', () => {
+  it('returns null when no expense category has crossed the 75% threshold', () => {
+    const ctx = makeContext({
+      categories: [{ name: 'Dining', kind: 'expense', budget: 3000, spentThisMonth: 2000, avgMonthlyHistorical: 0 }],
+    })
+    expect(composeBudgetPaceHighlight(ctx)).toBeNull()
+  })
+
+  it('ignores expense categories with no budget set', () => {
+    const ctx = makeContext({
+      categories: [{ name: 'Dining', kind: 'expense', spentThisMonth: 5000, avgMonthlyHistorical: 0 }],
+    })
+    expect(composeBudgetPaceHighlight(ctx)).toBeNull()
+  })
+
+  it('ignores income categories even if spend exceeds a "budget" value', () => {
+    const ctx = makeContext({
+      categories: [{ name: 'Salary', kind: 'income', budget: 1000, spentThisMonth: 1000, avgMonthlyHistorical: 0 }],
+    })
+    expect(composeBudgetPaceHighlight(ctx)).toBeNull()
+  })
+
+  it('flags the category with the highest budget-usage fraction once at or above 75%', () => {
+    const ctx = makeContext({
+      daysLeftInMonth: 9,
+      categories: [
+        { name: 'Dining', kind: 'expense', budget: 3000, spentThisMonth: 2460, avgMonthlyHistorical: 0 }, // 82%
+        { name: 'Transport', kind: 'expense', budget: 2000, spentThisMonth: 1000, avgMonthlyHistorical: 0 }, // 50%
+      ],
+    })
+    expect(composeBudgetPaceHighlight(ctx)).toBe(
+      `Dining is already 82% through its ${formatMoney(3000)} budget, with 9 days left this month.`,
+    )
+  })
+
+  it('reports being over budget once spend has passed 100%, using the singular "day" at 1 day left', () => {
+    const ctx = makeContext({
+      daysLeftInMonth: 1,
+      categories: [{ name: 'Rent', kind: 'expense', budget: 8000, spentThisMonth: 9000, avgMonthlyHistorical: 0 }],
+    })
+    expect(composeBudgetPaceHighlight(ctx)).toBe(
+      `Rent is already over its ${formatMoney(8000)} budget this month, with 1 day left.`,
+    )
+  })
+})
+
+const JULY_10 = new Date(2026, 6, 10) // July 10, 2026 — a 31-day month, ~32% elapsed
+
+function paceSeries(priorExpense: number, currentExpense: number): MonthlyPoint[] {
+  return [
+    { monthKey: '2026-06', income: 0, expense: priorExpense, netWorth: 0 },
+    { monthKey: '2026-07', income: 0, expense: currentExpense, netWorth: 0 },
+  ]
+}
+
+describe('composeSpendingPaceHighlight', () => {
+  it('returns null with fewer than two months of series data', () => {
+    expect(
+      composeSpendingPaceHighlight([{ monthKey: '2026-07', income: 0, expense: 1000, netWorth: 0 }], JULY_10),
+    ).toBeNull()
+  })
+
+  it('returns null when the prior month had no expenses to compare against', () => {
+    expect(composeSpendingPaceHighlight(paceSeries(0, 1000), JULY_10)).toBeNull()
+  })
+
+  it('returns null too early in the month, even with a big apparent gap', () => {
+    const earlyInMonth = new Date(2026, 6, 1) // day 1 of 31 -> ~3% elapsed, below the 10% minimum
+    expect(composeSpendingPaceHighlight(paceSeries(10000, 100000), earlyInMonth)).toBeNull()
+  })
+
+  it('returns null when the pace gap is within the normal range', () => {
+    // expectedByNow = 10000 * 10/31 ~= 3225.81; 5% above that is well under the 15% threshold
+    const expectedByNow = 10000 * (10 / 31)
+    expect(composeSpendingPaceHighlight(paceSeries(10000, expectedByNow * 1.05), JULY_10)).toBeNull()
+  })
+
+  it("flags spending running significantly above last month's pace", () => {
+    const expectedByNow = 10000 * (10 / 31)
+    const current = expectedByNow * 1.24
+    const message = composeSpendingPaceHighlight(paceSeries(10000, current), JULY_10)
+    expect(message).toBe(
+      `Spending this month is running about 24% above last month's pace at this point (${formatMoney(current)} so far vs ${formatMoney(expectedByNow)} expected by now).`,
+    )
+  })
+
+  it("flags spending running significantly below last month's pace", () => {
+    const expectedByNow = 10000 * (10 / 31)
+    const current = expectedByNow * 0.7 // 30% below, past the threshold
+    const message = composeSpendingPaceHighlight(paceSeries(10000, current), JULY_10)
+    expect(message).toContain('below')
+    expect(message).toContain('30%')
+  })
+})
+
+describe('composePersonalizedHighlight', () => {
+  it('prefers the budget pace highlight over the spending pace highlight when both are available', () => {
+    const ctx = makeContext({
+      daysLeftInMonth: 5,
+      categories: [{ name: 'Dining', kind: 'expense', budget: 1000, spentThisMonth: 900, avgMonthlyHistorical: 0 }],
+    })
+    const expectedByNow = 10000 * (10 / 31)
+    const series = paceSeries(10000, expectedByNow * 1.5) // would also trigger the spending-pace highlight
+    const result = composePersonalizedHighlight(ctx, series, JULY_10)
+    expect(result).toContain('Dining')
+  })
+
+  it('falls back to the spending pace highlight when no category is close to its budget', () => {
+    const ctx = makeContext({ categories: [] })
+    const expectedByNow = 10000 * (10 / 31)
+    const series = paceSeries(10000, expectedByNow * 1.3)
+    const result = composePersonalizedHighlight(ctx, series, JULY_10)
+    expect(result).toContain('above')
+  })
+
+  it('returns null when there is not enough grounded data for either highlight (e.g. a brand-new install)', () => {
+    const ctx = makeContext({ categories: [] })
+    expect(composePersonalizedHighlight(ctx, [], JULY_10)).toBeNull()
   })
 })

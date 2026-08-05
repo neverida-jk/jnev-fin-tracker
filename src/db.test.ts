@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import db, {
   addCategory,
+  addCommandAliasManually,
   archiveCategory,
   deleteCategory,
+  deleteCommandAlias,
   getOrCreateBalanceAdjustmentCategory,
   unarchiveCategory,
   updateCategory,
@@ -178,5 +180,48 @@ describe('deleteCategory', () => {
 
   it('throws when the category does not exist', async () => {
     await expect(deleteCategory(9999)).rejects.toThrow('Category not found.')
+  })
+})
+
+describe('addCommandAliasManually', () => {
+  it('creates a new normalized alias and returns its id', async () => {
+    const id = await addCommandAliasManually('  My WALLET  ', 'account', 1)
+    const alias = await db.commandAliases.get(id)
+    expect(alias).toMatchObject({ phrase: 'my wallet', entityType: 'account', entityId: 1 })
+  })
+
+  it('rejects a blank phrase', async () => {
+    await expect(addCommandAliasManually('   ', 'account', 1)).rejects.toThrow('Phrase cannot be empty.')
+    expect(await db.commandAliases.count()).toBe(0)
+  })
+
+  it('overwrites the entityId when the same phrase+entityType already exists, returning the existing id', async () => {
+    const firstId = await addCommandAliasManually('groceries', 'category', 10)
+    const secondId = await addCommandAliasManually('Groceries', 'category', 20)
+
+    expect(secondId).toBe(firstId)
+    expect(await db.commandAliases.count()).toBe(1)
+    const alias = await db.commandAliases.get(firstId)
+    expect(alias?.entityId).toBe(20)
+  })
+
+  it('treats the same phrase as distinct aliases when entityType differs', async () => {
+    const accountId = await addCommandAliasManually('cash', 'account', 1)
+    const categoryId = await addCommandAliasManually('cash', 'category', 2)
+
+    expect(accountId).not.toBe(categoryId)
+    expect(await db.commandAliases.count()).toBe(2)
+  })
+})
+
+describe('deleteCommandAlias', () => {
+  it('deletes an existing alias', async () => {
+    const id = await addCommandAliasManually('wallet', 'account', 1)
+    await deleteCommandAlias(id)
+    expect(await db.commandAliases.get(id)).toBeUndefined()
+  })
+
+  it('throws when the alias does not exist', async () => {
+    await expect(deleteCommandAlias(9999)).rejects.toThrow('Command alias not found.')
   })
 })

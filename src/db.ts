@@ -183,6 +183,53 @@ export async function saveCommandAlias(
   }
 }
 
+/**
+ * Deletes a single learned command alias. Simple delete — nothing else
+ * references a command alias row — but we still confirm it exists first so
+ * callers get a clear error instead of a silent no-op.
+ */
+export async function deleteCommandAlias(id: number): Promise<void> {
+  const existing = await db.commandAliases.get(id)
+  if (!existing) {
+    throw new Error('Command alias not found.')
+  }
+  await db.commandAliases.delete(id)
+}
+
+/**
+ * Lets the user proactively teach the command bar a phrase (an account
+ * nickname, local slang for a category) without first triggering a wrong
+ * fuzzy-match guess. Returns the id of the created or updated alias row.
+ * Reuses the exact normalization and duplicate-phrase-plus-entityType
+ * overwrite behavior as saveCommandAlias, but returns the row id since the
+ * Settings UI needs it to reflect the new/updated row immediately.
+ */
+export async function addCommandAliasManually(
+  phrase: string,
+  entityType: CommandAlias['entityType'],
+  entityId: number,
+): Promise<number> {
+  const normalized = phrase.trim().toLowerCase()
+  if (!normalized) {
+    throw new Error('Phrase cannot be empty.')
+  }
+  const existing = await db.commandAliases
+    .where('phrase')
+    .equals(normalized)
+    .and((a) => a.entityType === entityType)
+    .first()
+  if (existing) {
+    await db.commandAliases.update(existing.id, { entityId })
+    return existing.id
+  }
+  return db.commandAliases.add({
+    id: undefined as unknown as number,
+    phrase: normalized,
+    entityType,
+    entityId,
+  })
+}
+
 /** Patches an existing transaction (amount, category, date, note, etc.). */
 export async function updateTransaction(
   id: number,

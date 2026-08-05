@@ -19,6 +19,8 @@ import {
   ArchiveRestore,
 } from 'lucide-react'
 import Card from '../components/Card'
+import PickerGrid, { type PickerItem } from '../components/PickerGrid'
+import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import { staggerContainer, fadeUpItem, tapScale } from '../lib/motion'
 import { exportBackup, importBackup } from '../lib/backup'
 import db, {
@@ -27,8 +29,11 @@ import db, {
   archiveCategory,
   unarchiveCategory,
   deleteCategory,
+  deleteCommandAlias,
+  addCommandAliasManually,
   type Category,
   type CategoryKind,
+  type CommandAlias,
 } from '../db'
 
 // Preset swatches reuse the exact colors already assigned to the seeded
@@ -68,6 +73,7 @@ export default function Settings() {
     >
       <BackupSection />
       <CategoriesSection />
+      <WordsSection />
       <StorageSection />
     </motion.div>
   )
@@ -582,6 +588,279 @@ function AddCategoryForm() {
           className="flex w-full items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
         >
           <Plus size={16} /> Add category
+        </motion.button>
+      )}
+    </AnimatePresence>
+  )
+}
+
+type ResolvedAlias = CommandAlias & { resolvedName?: string }
+
+function WordsSection() {
+  const aliases = useLiveQuery(() => db.commandAliases.toArray(), [], [])
+  const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
+  const categories = useLiveQuery(() => db.categories.toArray(), [], [])
+
+  const accountNames = new Map((accounts ?? []).map((a) => [a.id, a.name]))
+  const categoryNames = new Map((categories ?? []).map((c) => [c.id, c.name]))
+
+  const rows: ResolvedAlias[] = (aliases ?? [])
+    .map((alias) => ({
+      ...alias,
+      resolvedName:
+        alias.entityType === 'account'
+          ? accountNames.get(alias.entityId)
+          : categoryNames.get(alias.entityId),
+    }))
+    .sort((a, b) => a.phrase.localeCompare(b.phrase))
+
+  return (
+    <Card variants={fadeUpItem}>
+      <h2 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-300">Words I use</h2>
+      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+        Phrases the command bar has learned map straight to an account or category instead of
+        guessing. Delete a stale or wrong one, or teach a new one below.
+      </p>
+
+      {rows.length === 0 ? (
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          No words learned yet. Correcting a guess in the command bar teaches it automatically — or
+          teach one yourself below.
+        </p>
+      ) : (
+        <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+          {rows.map((alias) => (
+            <WordRow key={alias.id} alias={alias} />
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-700/60">
+        <TeachWordForm />
+      </div>
+    </Card>
+  )
+}
+
+function WordRow({ alias }: { alias: ResolvedAlias }) {
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleDelete() {
+    setError(null)
+    try {
+      await deleteCommandAlias(alias.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete word.')
+    }
+  }
+
+  return (
+    <li className="py-2.5 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-medium text-slate-700 dark:text-slate-300">
+            "{alias.phrase}"
+          </span>
+          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium capitalize text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+            {alias.entityType}
+          </span>
+          <span className="truncate text-xs text-slate-500 dark:text-slate-400">
+            &rarr; {alias.resolvedName ?? 'Unknown (deleted)'}
+          </span>
+        </span>
+        <button
+          type="button"
+          onClick={handleDelete}
+          aria-label={`Delete word ${alias.phrase}`}
+          className="shrink-0 text-slate-400 hover:text-red-600 dark:hover:text-red-400"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      {error && (
+        <p className="mt-1.5 text-xs text-red-600 dark:text-red-400" role="alert">
+          {error}
+        </p>
+      )}
+    </li>
+  )
+}
+
+function TeachWordForm() {
+  const [open, setOpen] = useState(false)
+  const [phrase, setPhrase] = useState('')
+  const [entityType, setEntityType] = useState<CommandAlias['entityType']>('category')
+  const [entityId, setEntityId] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
+  const categories = useLiveQuery(() => db.categories.toArray(), [], [])
+  const userCategories = (categories ?? []).filter((c) => !c.system)
+
+  const selectedName =
+    entityId === null
+      ? null
+      : entityType === 'account'
+        ? (accounts ?? []).find((a) => a.id === entityId)?.name
+        : userCategories.find((c) => c.id === entityId)?.name
+
+  function openForm() {
+    setPhrase('')
+    setEntityType('category')
+    setEntityId(null)
+    setError(null)
+    setSaved(false)
+    setOpen(true)
+  }
+
+  function selectType(type: CommandAlias['entityType']) {
+    setEntityType(type)
+    setEntityId(null)
+  }
+
+  async function handleTeach() {
+    setError(null)
+    if (!phrase.trim()) {
+      setError('Enter a word or phrase.')
+      return
+    }
+    if (entityId === null) {
+      setError(`Choose which ${entityType} "${phrase.trim()}" should mean.`)
+      return
+    }
+    try {
+      await addCommandAliasManually(phrase, entityType, entityId)
+      setSaved(true)
+      setTimeout(() => setOpen(false), 500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save word.')
+    }
+  }
+
+  const pickerItems: PickerItem[] =
+    entityType === 'account'
+      ? (accounts ?? []).map((a) => ({ id: a.id, label: a.name, icon: ACCOUNT_ICONS[a.type] }))
+      : userCategories.map((c) => ({ id: c.id, label: c.name, dotColor: c.color }))
+
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      {open ? (
+        <motion.div
+          key="form"
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          className="space-y-3 overflow-hidden"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Teach a word</span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="Close teach a word form"
+              className="text-slate-400 dark:text-slate-500"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <label htmlFor="teach-word-phrase" className="sr-only">
+            Word or phrase
+          </label>
+          <input
+            id="teach-word-phrase"
+            type="text"
+            autoFocus
+            value={phrase}
+            onChange={(e) => setPhrase(e.target.value)}
+            placeholder="e.g. grab, gcash, tita's carinderia"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+          />
+
+          <div className="relative flex gap-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+            {(['category', 'account'] as CommandAlias['entityType'][]).map((type) => (
+              <button
+                type="button"
+                key={type}
+                onClick={() => selectType(type)}
+                aria-pressed={entityType === type}
+                className={`relative z-10 flex-1 rounded-md py-2 text-sm font-medium capitalize transition-colors ${
+                  entityType === type ? 'text-white' : 'text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                {entityType === type && (
+                  <motion.span
+                    layoutId="teach-word-type-pill"
+                    className="absolute inset-0 -z-10 rounded-md bg-indigo-600"
+                    transition={{ type: 'spring', stiffness: 500, damping: 34 }}
+                  />
+                )}
+                {type}
+              </button>
+            ))}
+          </div>
+
+          {pickerItems.length === 0 ? (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              No {entityType === 'account' ? 'accounts' : 'categories'} to choose from yet.
+            </p>
+          ) : (
+            <>
+              {selectedName && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Resolves to <span className="font-medium text-slate-700 dark:text-slate-300">{selectedName}</span>
+                </p>
+              )}
+              <PickerGrid
+                title={entityType}
+                items={pickerItems}
+                onPick={(id) => setEntityId(id)}
+              />
+            </>
+          )}
+
+          {error && (
+            <p className="text-xs text-red-600 dark:text-red-400" role="alert">
+              {error}
+            </p>
+          )}
+
+          <motion.button
+            {...tapScale}
+            type="button"
+            disabled={!phrase.trim() || entityId === null}
+            onClick={handleTeach}
+            animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
+            className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white disabled:opacity-40"
+          >
+            <AnimatePresence mode="wait" initial={false}>
+              {saved ? (
+                <motion.span
+                  key="saved"
+                  initial={{ opacity: 0, scale: 0.7 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-center gap-1.5"
+                >
+                  <Check size={16} /> Saved
+                </motion.span>
+              ) : (
+                <motion.span key="save" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  Teach word
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.button>
+        </motion.div>
+      ) : (
+        <motion.button
+          key="cta"
+          {...tapScale}
+          onClick={openForm}
+          className="flex w-full items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
+        >
+          <Plus size={16} /> Teach a word
         </motion.button>
       )}
     </AnimatePresence>

@@ -1,5 +1,11 @@
 import type { Account, Budget, Category, Transaction, Transfer } from '../db'
-import { accountBalance, averageMonthlySpend, daysLeftInMonth, spentByCategoryThisMonth } from './finance'
+import {
+  accountBalance,
+  averageMonthlySpend,
+  daysLeftInMonth,
+  spentByCategoryThisMonth,
+  type MonthlyPoint,
+} from './finance'
 import { currentMonthKey } from './dates'
 import { formatMoney } from './format'
 import {
@@ -184,4 +190,91 @@ export function composePurchaseAdvice(context: FinancialContext, amount: number 
   return cooldownNote
     ? `I don't have a specific budget to check that against, but it's ${formatMoney(amount)}.${cooldownNote}`
     : `I don't have a specific budget to check that against, but ${formatMoney(amount)} isn't in cooldown-rule territory (under ₱${IMPULSE_COOLDOWN_AMOUNT.toLocaleString()}) — your call.`
+}
+
+// A category's budget is considered "worth calling out" once this much of
+// it has already been used this month — high enough that it's a real
+// heads-up rather than routine mid-month progress.
+const BUDGET_PACE_ALERT_THRESHOLD = 0.75
+
+// The prior-month-pace comparison (composeSpendingPaceHighlight) is only
+// worth a sentence once the gap is at least this large — small swings are
+// normal month to month and not worth flagging.
+const SPENDING_PACE_ALERT_FRACTION = 0.15
+
+// Comparing today's spend-to-date against last month's full total scaled by
+// how far into the month we are is noisy in the first few days of a month
+// (a single big grocery run on day 2 looks like a huge "spike"). Wait until
+// at least this fraction of the month has elapsed before drawing a
+// conclusion.
+const MIN_MONTH_FRACTION_ELAPSED_FOR_PACE_CHECK = 0.1
+
+/** "You're already deep into a budget" — the single expense category (if
+ * any) that has used up the largest share of its monthly budget, once that
+ * share is at or above BUDGET_PACE_ALERT_THRESHOLD. Built entirely from
+ * `context.categories`, i.e. straight from spentByCategoryThisMonth and the
+ * budgets the user set — never invents a number. Categories without a
+ * budget are skipped (nothing to compare against). Returns null when no
+ * category currently qualifies. */
+export function composeBudgetPaceHighlight(context: FinancialContext): string | null {
+  const candidates = context.categories
+    .filter((c) => c.kind === 'expense' && c.budget !== undefined && c.budget > 0)
+    .map((c) => {
+      const budget = c.budget as number
+      return { name: c.name, budget, spent: c.spentThisMonth, fraction: c.spentThisMonth / budget }
+    })
+    .filter((c) => c.fraction >= BUDGET_PACE_ALERT_THRESHOLD)
+    .sort((a, b) => b.fraction - a.fraction)
+
+  const top = candidates[0]
+  if (!top) return null
+
+  const dayWord = context.daysLeftInMonth === 1 ? 'day' : 'days'
+  if (top.fraction >= 1) {
+    return `${top.name} is already over its ${formatMoney(top.budget)} budget this month, with ${context.daysLeftInMonth} ${dayWord} left.`
+  }
+  return `${top.name} is already ${pct(top.fraction)} through its ${formatMoney(top.budget)} budget, with ${context.daysLeftInMonth} ${dayWord} left this month.`
+}
+
+/** "Overall spending is running hot/cool vs last month" — compares this
+ * month's expense total so far against what last month's expense total
+ * would suggest for the same point in the month (last month's full total,
+ * scaled down by how far through the current month we are). Built directly
+ * on top of `buildMonthlySeries`'s output — pass in at least 2 months
+ * (current + at least one prior). Returns null when there isn't a prior
+ * month to compare against, it's too early in the month to trust the
+ * comparison, or the gap isn't large enough to be worth a callout. */
+export function composeSpendingPaceHighlight(series: MonthlyPoint[], today: Date = new Date()): string | null {
+  if (series.length < 2) return null
+  const current = series[series.length - 1]
+  const prior = series[series.length - 2]
+  if (prior.expense <= 0) return null
+
+  const totalDaysThisMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+  const fractionElapsed = today.getDate() / totalDaysThisMonth
+  if (fractionElapsed < MIN_MONTH_FRACTION_ELAPSED_FOR_PACE_CHECK) return null
+
+  const expectedByNow = prior.expense * fractionElapsed
+  if (expectedByNow <= 0) return null
+
+  const diffFraction = (current.expense - expectedByNow) / expectedByNow
+  if (Math.abs(diffFraction) < SPENDING_PACE_ALERT_FRACTION) return null
+
+  const direction = diffFraction > 0 ? 'above' : 'below'
+  return `Spending this month is running about ${pct(Math.abs(diffFraction))} ${direction} last month's pace at this point (${formatMoney(current.expense)} so far vs ${formatMoney(expectedByNow)} expected by now).`
+}
+
+/** The single best personalized, data-grounded insight to surface — or null
+ * when there's genuinely nothing meaningful to say yet (e.g. a brand-new
+ * install with no budgets or history). Prefers the more specific,
+ * actionable category-budget-pace insight; falls back to the coarser
+ * overall-spending-pace comparison. Never fabricates a figure — every
+ * number comes from `context` (itself built from real transactions/budgets)
+ * or `series` (from buildMonthlySeries). */
+export function composePersonalizedHighlight(
+  context: FinancialContext,
+  series: MonthlyPoint[],
+  today: Date = new Date(),
+): string | null {
+  return composeBudgetPaceHighlight(context) ?? composeSpendingPaceHighlight(series, today)
 }
