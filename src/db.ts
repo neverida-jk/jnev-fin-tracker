@@ -17,6 +17,7 @@ export interface Category {
   kind: CategoryKind
   color: string
   system?: boolean // hidden from normal category pickers (e.g. balance adjustments)
+  archived?: boolean // retired by the user; kept so existing transactions/budgets still resolve, but excluded from normal pickers going forward
 }
 
 export interface Transaction {
@@ -144,6 +145,18 @@ db.version(4).stores({
   commandAliases: '++id, phrase, entityType',
 })
 
+db.version(5).stores({
+  accounts: '++id, name, type',
+  categories: '++id, name, kind, archived',
+  transactions: '++id, accountId, categoryId, date, payoutDateId',
+  budgets: '++id, categoryId',
+  recurringBills: '++id, dueDay, active',
+  payoutSchedules: '++id, active',
+  payoutDates: '++id, scheduleId, date',
+  transfers: '++id, fromAccountId, toAccountId, date',
+  commandAliases: '++id, phrase, entityType',
+})
+
 export default db
 
 export async function saveCommandAlias(
@@ -230,6 +243,122 @@ export async function deleteRecurringBill(id: number): Promise<void> {
  */
 export async function deleteBudget(id: number): Promise<void> {
   await db.budgets.delete(id)
+}
+
+/**
+ * Creates a new user-defined category. Rejects a blank name and rejects
+ * exact-duplicate name+kind combos (case-insensitive) so the picker never
+ * ends up with two indistinguishable "Groceries" entries.
+ */
+export async function addCategory(input: {
+  name: string
+  kind: CategoryKind
+  color: string
+}): Promise<number> {
+  const trimmed = input.name.trim()
+  if (!trimmed) {
+    throw new Error('Category name cannot be empty.')
+  }
+
+  const duplicate = await db.categories
+    .where('kind')
+    .equals(input.kind)
+    .and((c) => c.name.trim().toLowerCase() === trimmed.toLowerCase())
+    .first()
+  if (duplicate) {
+    throw new Error(`A ${input.kind} category named "${trimmed}" already exists.`)
+  }
+
+  return db.categories.add({
+    id: undefined as unknown as number,
+    name: trimmed,
+    kind: input.kind,
+    color: input.color,
+  })
+}
+
+/**
+ * Renames and/or recolors a category. System categories (e.g. Balance
+ * Adjustment) are internal plumbing, not user-facing budget buckets, so
+ * editing them is blocked outright.
+ */
+export async function updateCategory(
+  id: number,
+  patch: Partial<Pick<Category, 'name' | 'color'>>,
+): Promise<void> {
+  const category = await db.categories.get(id)
+  if (!category) {
+    throw new Error('Category not found.')
+  }
+  if (category.system) {
+    throw new Error('System categories cannot be renamed or recolored.')
+  }
+
+  const update: Partial<Pick<Category, 'name' | 'color'>> = {}
+  if (patch.name !== undefined) {
+    const trimmed = patch.name.trim()
+    if (!trimmed) {
+      throw new Error('Category name cannot be empty.')
+    }
+    update.name = trimmed
+  }
+  if (patch.color !== undefined) {
+    update.color = patch.color
+  }
+
+  await db.categories.update(id, update)
+}
+
+/**
+ * Retires a category from normal pickers without touching the transactions
+ * or budgets that already reference it — those keep resolving against the
+ * archived row. System categories are never user-facing, so archiving one
+ * makes no sense and is refused.
+ */
+export async function archiveCategory(id: number): Promise<void> {
+  const category = await db.categories.get(id)
+  if (!category) {
+    throw new Error('Category not found.')
+  }
+  if (category.system) {
+    throw new Error('System categories cannot be archived.')
+  }
+  await db.categories.update(id, { archived: true })
+}
+
+/** Restores an archived category to normal pickers. */
+export async function unarchiveCategory(id: number): Promise<void> {
+  await db.categories.update(id, { archived: false })
+}
+
+/**
+ * Deletes a category, but only if nothing still references it. Same
+ * referential-integrity policy as deleteAccount: cascading deletes would
+ * silently orphan transaction/budget history, so instead we block the
+ * delete and tell the caller to archive it instead. System categories are
+ * never deletable.
+ */
+export async function deleteCategory(id: number): Promise<void> {
+  const category = await db.categories.get(id)
+  if (!category) {
+    throw new Error('Category not found.')
+  }
+  if (category.system) {
+    throw new Error('System categories cannot be deleted.')
+  }
+
+  const [transactionCount, budgetCount] = await Promise.all([
+    db.transactions.where('categoryId').equals(id).count(),
+    db.budgets.where('categoryId').equals(id).count(),
+  ])
+
+  if (transactionCount > 0 || budgetCount > 0) {
+    throw new Error(
+      'This category still has transactions or a budget using it. Archive it instead of deleting.',
+    )
+  }
+
+  await db.categories.delete(id)
 }
 
 export const BALANCE_ADJUSTMENT_CATEGORY = 'Balance Adjustment'

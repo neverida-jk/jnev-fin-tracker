@@ -353,7 +353,12 @@ function TransactionEditForm({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const pickableCategories = categories.filter((c) => !c.system)
+  // Exclude archived categories from the choices going forward, but keep the
+  // transaction's currently-assigned category visible (even if archived) so
+  // its chip still renders and shows as selected.
+  const pickableCategories = categories.filter(
+    (c) => !c.system && (!c.archived || c.id === transaction.categoryId),
+  )
 
   async function save() {
     const numericAmount = Number(amount)

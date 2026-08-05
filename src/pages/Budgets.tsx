@@ -18,8 +18,12 @@ export default function Budgets() {
   const categoriesById = new Map((categories ?? []).map((c) => [c.id, c]))
 
   const budgetedCategoryIds = new Set((budgets ?? []).map((b) => b.categoryId))
+  // Only offer non-archived, non-system expense categories that don't already
+  // have a budget when starting a NEW budget. Existing budget rows above are
+  // rendered straight from categoriesById and are unaffected, so a budget
+  // whose category later gets archived keeps showing normally.
   const availableCategories = (categories ?? []).filter(
-    (c) => c.kind === 'expense' && !budgetedCategoryIds.has(c.id),
+    (c) => c.kind === 'expense' && !c.system && !c.archived && !budgetedCategoryIds.has(c.id),
   )
 
   async function updateLimit(id: number, value: string) {

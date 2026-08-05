@@ -52,7 +52,7 @@ export default function AddTransaction() {
   }, [schedule, payoutDate])
 
   const filteredCategories = useMemo(
-    () => (categories ?? []).filter((c) => c.kind === kind && !c.system),
+    () => (categories ?? []).filter((c) => c.kind === kind && !c.system && !c.archived),
     [categories, kind],
   )
 

@@ -431,9 +431,13 @@ function findTransactionTarget(
 }
 
 /** Short one-line description of a transaction for delete/edit confirmation
- * summaries — e.g. "Jul 31 - Groceries -₱200.00 (GCash)". */
+ * summaries — e.g. "Jul 31 - Groceries -₱200.00 (GCash)". Looks the category
+ * up in `allCategories` (falling back to `categories`) rather than the
+ * matching pool, since an existing transaction may point at a category
+ * that's since been archived — archived categories are excluded from
+ * matching/assignment, but still need to resolve here for display. */
 function describeTransaction(t: Transaction, ctx: ParseContext): string {
-  const category = ctx.categories.find((c) => c.id === t.categoryId)
+  const category = (ctx.allCategories ?? ctx.categories).find((c) => c.id === t.categoryId)
   const account = ctx.accounts.find((a) => a.id === t.accountId)
   const signed = category ? signedAmount(t.amount, category.kind) : t.amount
   const dateLabel = parseISODate(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -442,7 +446,17 @@ function describeTransaction(t: Transaction, ctx: ParseContext): string {
 
 export interface ParseContext {
   accounts: Account[]
+  /** The pool used for all category matching/resolution (fuzzy find, lexicon,
+   * alias lookup) and for picking a category on a new/reassigned transaction.
+   * Callers should exclude archived categories here so they're never
+   * resolved for a going-forward assignment — see `allCategories` below for
+   * the by-id lookup archived categories still need. */
   categories: Category[]
+  /** Full category list, including archived ones — used only for by-id
+   * display lookups (e.g. naming the category of an existing transaction in
+   * a delete/edit confirmation summary) where an archived category must
+   * still resolve correctly. Falls back to `categories` if omitted. */
+  allCategories?: Category[]
   aliases?: CommandAlias[]
   /** Account to prefer when no account can be resolved at all (e.g. the most
    * recently used one) — falls back to accounts[0] if omitted. */

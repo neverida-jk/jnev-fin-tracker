@@ -392,6 +392,42 @@ describe('parseCommand — deleteBudget', () => {
   })
 })
 
+describe('parseCommand — archived categories excluded from matching', () => {
+  // CommandBar never hands parseCommand the raw category list — it filters
+  // out archived categories first (`categories.filter(c => !c.archived)`,
+  // see CommandBar.tsx) so a retired category can never be picked for a new
+  // or reassigned transaction. Reproduce that same filter here so a
+  // regression in either place (CommandBar forgetting to filter, or the
+  // parser starting to bypass ctx.categories) would show up as a failure.
+  const ARCHIVED_MATCH = 'Zorbing Fees'
+
+  it('does not fuzzy/exact-match an archived category, falling back to Other Expense instead', () => {
+    const withArchived: Category[] = [
+      ...categories,
+      { id: 100, name: ARCHIVED_MATCH, kind: 'expense', color: '#123456', archived: true },
+    ]
+    const activeCategories = withArchived.filter((c) => !c.archived)
+
+    const cmd = parseCommand('expense 100 zorbing fees gcash', { ...baseCtx, categories: activeCategories })
+    expect(cmd.type).toBe('expense')
+    expect(cmd.categoryId).not.toBe(100)
+    expect(cmd.categoryId).toBe(OTHER_EXPENSE)
+  })
+
+  it('still matches a same-named category that is not archived', () => {
+    const withActive: Category[] = [
+      ...categories,
+      { id: 100, name: ARCHIVED_MATCH, kind: 'expense', color: '#123456' },
+    ]
+    const activeCategories = withActive.filter((c) => !c.archived)
+
+    const cmd = parseCommand('expense 100 zorbing fees gcash', { ...baseCtx, categories: activeCategories })
+    expect(cmd.type).toBe('expense')
+    expect(cmd.categoryId).toBe(100)
+    expect(cmd.categoryConfidence).toBe('exact')
+  })
+})
+
 describe('parseCommand — learned aliases', () => {
   it('prefers a learned CommandAlias over the built-in lexicon match', () => {
     // "jeep" is a built-in Transport lexicon keyword, but a learned alias

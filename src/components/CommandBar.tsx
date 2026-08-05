@@ -156,11 +156,20 @@ export default function CommandBar() {
     return result.message
   }, [result, fixedTransaction, accounts, categories])
 
+  // Archived categories are retired from normal use — they must never be
+  // resolved/matched for a new or reassigned transaction (expense, income,
+  // setBudget, editTransaction's category-change path, etc.), so this is the
+  // pool handed to the parser for matching. `categories` itself stays
+  // unfiltered for by-id display lookups (see `allCategories` below and
+  // ParseContext's docs in commandParser.ts).
+  const activeCategories = useMemo(() => (categories ?? []).filter((c) => !c.archived), [categories])
+
   const parsed = useMemo(() => {
     if (!text.trim() || !accounts || !categories) return null
     return parseCommand(text, {
       accounts,
-      categories,
+      categories: activeCategories,
+      allCategories: categories,
       aliases: aliases ?? [],
       defaultAccountId,
       budgets: budgets ?? [],
@@ -174,6 +183,7 @@ export default function CommandBar() {
     text,
     accounts,
     categories,
+    activeCategories,
     aliases,
     defaultAccountId,
     budgets,
@@ -285,8 +295,11 @@ export default function CommandBar() {
     setFixing(null)
   }
 
-  const expenseCategories = (categories ?? []).filter((c) => c.kind === 'expense' && !c.system)
-  const incomeCategories = (categories ?? []).filter((c) => c.kind === 'income' && !c.system)
+  // Reassignment pickers (fuzzy-field correction, "Wrong category?" fix) only
+  // ever offer a NEW category going forward, so these are built from
+  // activeCategories (archived excluded) rather than the raw `categories`.
+  const expenseCategories = activeCategories.filter((c) => c.kind === 'expense' && !c.system)
+  const incomeCategories = activeCategories.filter((c) => c.kind === 'income' && !c.system)
   const categoryOptions = fixedTransaction
     ? (categories ?? []).find((c) => c.id === fixedTransaction.categoryId)?.kind === 'income'
       ? incomeCategories
