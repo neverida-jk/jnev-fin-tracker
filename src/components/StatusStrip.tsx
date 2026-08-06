@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
+import { Gauge } from 'lucide-react'
 import db from '../db'
-import { netWorth } from '../lib/finance'
+import { computeDailyAllowance } from '../lib/dailyAllowance'
 import { getNextPendingPayout } from '../lib/payout'
 import { formatMoney } from '../lib/format'
 import { parseISODate, todayISO } from '../lib/dates'
@@ -27,17 +28,20 @@ function payoutPhrase(days: number): string {
  * gone. Deliberately low-contrast so it never competes with page content or
  * the Quick Command FAB, which floats over its bottom-right corner. */
 export default function StatusStrip() {
-  const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
   const transactions = useLiveQuery(() => db.transactions.toArray(), [], [])
-  const transfers = useLiveQuery(() => db.transfers.toArray(), [], [])
-  const categories = useLiveQuery(() => db.categories.toArray(), [], [])
+  const budgets = useLiveQuery(() => db.budgets.toArray(), [], [])
   const payoutSchedules = useLiveQuery(() => db.payoutSchedules.toArray(), [], [])
   const payoutDates = useLiveQuery(() => db.payoutDates.toArray(), [], [])
 
-  const loading = !accounts || !transactions || !categories
+  const loading = !transactions || !budgets
 
-  const categoriesById = new Map((categories ?? []).map((c) => [c.id, c]))
-  const worth = loading ? 0 : netWorth(accounts, transactions, transfers ?? [], categoriesById)
+  const allowance = loading ? null : computeDailyAllowance(budgets, transactions)
+  const allowanceText =
+    allowance === null
+      ? null
+      : allowance.amountPerDay === null
+        ? allowance.reason
+        : `${formatMoney(allowance.amountPerDay)}/day safe to spend`
 
   const nextPayout = getNextPendingPayout(payoutSchedules ?? [], payoutDates ?? [])
   const payoutText = nextPayout ? payoutPhrase(daysUntil(nextPayout.payoutDate.date)) : null
@@ -45,15 +49,16 @@ export default function StatusStrip() {
   const summary = loading
     ? 'Loading…'
     : payoutText
-      ? `Net worth ${formatMoney(worth)} · ${payoutText}`
-      : `Net worth ${formatMoney(worth)}`
+      ? `${allowanceText} · ${payoutText}`
+      : allowanceText
 
   return (
     <div className="shrink-0 border-t border-slate-200/70 bg-white/80 px-4 py-2 backdrop-blur-md dark:border-slate-800/70 dark:bg-slate-900/80">
       {/* pr-20 keeps text clear of the Quick Command FAB (h-12 button at
           bottom-6 right-4), so the strip never overlaps or competes with it. */}
-      <p className="truncate pr-20 text-[11px] font-medium tracking-wide text-slate-400 dark:text-slate-500">
-        {summary}
+      <p className="flex items-center gap-1 truncate pr-20 text-[11px] font-medium tracking-wide text-slate-400 dark:text-slate-500">
+        <Gauge className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span className="truncate">{summary}</span>
       </p>
     </div>
   )

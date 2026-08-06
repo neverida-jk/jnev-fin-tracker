@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, Category, Transaction, Transfer } from '../db'
-import { accountBalance, averageMonthlySpend, daysLeftInMonth, netWorth, signedAmount, spentByCategoryThisMonth } from './finance'
+import {
+  accountBalance,
+  averageMonthlySpend,
+  buildWeeklySeries,
+  daysLeftInMonth,
+  netWorth,
+  signedAmount,
+  spentByCategoryThisMonth,
+  spentByCategoryThisWeek,
+} from './finance'
 
 const income: Category = { id: 1, name: 'Salary', kind: 'income', color: '#0f0' }
 const expense: Category = { id: 2, name: 'Groceries', kind: 'expense', color: '#f00' }
@@ -84,6 +93,49 @@ describe('spentByCategoryThisMonth', () => {
 
   it('returns 0 when there is no matching spend', () => {
     expect(spentByCategoryThisMonth([], expense.id, new Date(2026, 6, 20))).toBe(0)
+  })
+})
+
+describe('spentByCategoryThisWeek', () => {
+  it('sums only the given category within the Monday-Sunday week', () => {
+    // 2026-07-15 is a Wednesday; its Monday-start week runs 07-13..07-19.
+    const transactions = [
+      tx({ categoryId: expense.id, date: '2026-07-13', amount: 100 }), // Monday, in week
+      tx({ categoryId: expense.id, date: '2026-07-19', amount: 50 }), // Sunday, in week
+      tx({ categoryId: expense.id, date: '2026-07-12', amount: 999 }), // previous week
+      tx({ categoryId: expense.id, date: '2026-07-20', amount: 999 }), // next week
+      tx({ categoryId: income.id, date: '2026-07-15', amount: 999 }), // different category
+    ]
+    expect(spentByCategoryThisWeek(transactions, expense.id, new Date(2026, 6, 15))).toBe(150)
+  })
+
+  it('returns 0 when there is no matching spend', () => {
+    expect(spentByCategoryThisWeek([], expense.id, new Date(2026, 6, 15))).toBe(0)
+  })
+})
+
+describe('buildWeeklySeries', () => {
+  it('buckets income/expense into Monday-start weeks, excluding system categories', () => {
+    const system: Category = { id: 3, name: 'Balance Adjustment', kind: 'income', color: '#999', system: true }
+    const byId = new Map<number, Category>([...categoriesById, [system.id, system]])
+    const transactions = [
+      tx({ categoryId: income.id, date: '2026-07-06', amount: 500 }), // week of 07-06
+      tx({ categoryId: expense.id, date: '2026-07-12', amount: 200 }), // week of 07-06 (Sunday)
+      tx({ categoryId: expense.id, date: '2026-07-13', amount: 300 }), // week of 07-13 (Monday)
+      tx({ categoryId: income.id, date: '2026-07-19', amount: 400 }), // week of 07-13 (Sunday)
+      tx({ categoryId: system.id, date: '2026-07-13', amount: 999 }), // system, excluded
+      tx({ categoryId: 999, date: '2026-07-13', amount: 999 }), // unresolved category, skipped
+    ]
+    const series = buildWeeklySeries([gcash, savings], transactions, byId, 2, new Date(2026, 6, 15))
+    expect(series).toEqual([
+      { weekKey: '2026-07-06', income: 500, expense: 200 },
+      { weekKey: '2026-07-13', income: 400, expense: 300 },
+    ])
+  })
+
+  it('has no netWorth field', () => {
+    const series = buildWeeklySeries([gcash], [], categoriesById, 1, new Date(2026, 6, 15))
+    expect(series[0]).not.toHaveProperty('netWorth')
   })
 })
 

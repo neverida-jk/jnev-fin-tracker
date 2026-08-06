@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -14,7 +14,6 @@ import {
   CartesianGrid,
   BarChart,
   Bar,
-  Legend,
 } from 'recharts'
 import {
   TrendingUp,
@@ -32,8 +31,14 @@ import PendingPayoutBanner from '../components/PendingPayoutBanner'
 import AnimatedMoney from '../components/AnimatedMoney'
 import Tile from '../components/Tile'
 import Card from '../components/Card'
-import { formatMoney, formatMonthLabel } from '../lib/format'
-import { netWorth, spentByCategoryThisMonth, buildMonthlySeries } from '../lib/finance'
+import { formatMoney, formatMonthLabel, formatWeekLabel } from '../lib/format'
+import {
+  netWorth,
+  spentByCategoryThisMonth,
+  spentByCategoryThisWeek,
+  buildMonthlySeries,
+  buildWeeklySeries,
+} from '../lib/finance'
 import { buildFinancialContext, composePersonalizedHighlight } from '../lib/financialContext'
 import { detectUnusualSpend } from '../lib/anomalyDetection'
 import { getUpcomingUnpaidBills } from '../lib/bills'
@@ -41,7 +46,26 @@ import { staggerContainer, fadeUpItem, collapseItem } from '../lib/motion'
 import { generateMonthInReview, type MonthInReviewInput } from '../lib/monthInReview'
 import type { AiTier } from '../lib/aiEngine'
 
+type ChartPeriod = 'week' | 'month'
+
+// Shared recharts <Tooltip> styling so the three inline charts get a small
+// rounded/shadowed popover matching the app's Card conventions instead of
+// recharts' plain default box.
+const tooltipContentStyle: CSSProperties = {
+  borderRadius: 12,
+  border: '1px solid rgb(226 232 240)',
+  boxShadow: '0 4px 12px -2px rgb(15 23 42 / 0.08)',
+  fontSize: 12,
+  padding: '6px 10px',
+}
+const tooltipWrapperStyle: CSSProperties = { outline: 'none' }
+
 export default function Dashboard() {
+  // Shared by the "spend by category" and "income vs expense" charts below;
+  // "Net worth over time" is deliberately excluded from this toggle and
+  // stays monthly-only.
+  const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('month')
+
   const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
   const transactions = useLiveQuery(() => db.transactions.toArray(), [], [])
   const transfers = useLiveQuery(() => db.transfers.toArray(), [], [])
@@ -81,18 +105,34 @@ export default function Dashboard() {
   const pieData = expenseCategories
     .map((c) => ({
       name: c.name,
-      value: spentByCategoryThisMonth(transactions ?? [], c.id),
+      value:
+        chartPeriod === 'week'
+          ? spentByCategoryThisWeek(transactions ?? [], c.id)
+          : spentByCategoryThisMonth(transactions ?? [], c.id),
       color: c.color,
     }))
     .filter((d) => d.value > 0)
 
-  const reportsSeries = loading ? [] : buildMonthlySeries(accounts, transactions, categoriesById, 6)
-  const reportsChartData = reportsSeries.map((p) => ({
+  // Net worth trend is deliberately monthly-only, unaffected by chartPeriod.
+  const netWorthSeries = loading ? [] : buildMonthlySeries(accounts, transactions, categoriesById, 6)
+  const netWorthChartData = netWorthSeries.map((p) => ({
     month: formatMonthLabel(p.monthKey),
-    Income: p.income,
-    Expense: p.expense,
     'Net worth': p.netWorth,
   }))
+
+  const incomeExpenseChartData = loading
+    ? []
+    : chartPeriod === 'week'
+      ? buildWeeklySeries(accounts, transactions, categoriesById, 8).map((p) => ({
+          period: formatWeekLabel(p.weekKey),
+          Income: p.income,
+          Expense: p.expense,
+        }))
+      : buildMonthlySeries(accounts, transactions, categoriesById, 6).map((p) => ({
+          period: formatMonthLabel(p.monthKey),
+          Income: p.income,
+          Expense: p.expense,
+        }))
 
   const monthInReviewInput: MonthInReviewInput = {
     transactions: transactions ?? [],
@@ -236,33 +276,49 @@ export default function Dashboard() {
         className="mx-4 mt-3 space-y-3"
       >
         <Card tone="default" variants={fadeUpItem}>
-          <h2 className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
-            Spend by category (this month)
-          </h2>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Spend by category (this {chartPeriod})
+            </h2>
+            <PeriodToggle
+              period={chartPeriod}
+              setPeriod={setChartPeriod}
+              idPrefix="pie"
+              label="Spend by category period"
+            />
+          </div>
           {pieData.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No expenses logged yet this month.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              No expenses logged yet this {chartPeriod}.
+            </p>
           ) : (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={50}
-                    outerRadius={80}
-                    animationDuration={700}
-                    animationEasing="ease-out"
-                  >
-                    {pieData.map((d) => (
-                      <Cell key={d.name} fill={d.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => formatMoney(Number(value))} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+            <>
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={38}
+                      outerRadius={62}
+                      animationDuration={700}
+                      animationEasing="ease-out"
+                    >
+                      {pieData.map((d) => (
+                        <Cell key={d.name} fill={d.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value) => formatMoney(Number(value))}
+                      contentStyle={tooltipContentStyle}
+                      wrapperStyle={tooltipWrapperStyle}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <ChartLegend items={pieData.map((d) => ({ label: d.name, color: d.color }))} />
+            </>
           )}
         </Card>
 
@@ -270,18 +326,32 @@ export default function Dashboard() {
           <h2 className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
             Net worth over time
           </h2>
-          <div className="h-56">
+          <div className="h-40">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={reportsChartData}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} width={60} />
-                <Tooltip formatter={(value) => formatMoney(Number(value))} />
+              <LineChart data={netWorthChartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                <CartesianGrid
+                  vertical={false}
+                  strokeDasharray="0"
+                  className="stroke-slate-100 dark:stroke-slate-700/50"
+                />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 10, fill: 'currentColor' }}
+                  className="text-slate-400 dark:text-slate-500"
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis hide />
+                <Tooltip
+                  formatter={(value) => formatMoney(Number(value))}
+                  contentStyle={tooltipContentStyle}
+                  wrapperStyle={tooltipWrapperStyle}
+                />
                 <Line
                   type="monotone"
                   dataKey="Net worth"
                   stroke="#4f46e5"
-                  strokeWidth={2}
+                  strokeWidth={1.5}
                   dot={false}
                   animationDuration={800}
                   animationEasing="ease-out"
@@ -292,24 +362,125 @@ export default function Dashboard() {
         </Card>
 
         <Card tone="default" variants={fadeUpItem}>
-          <h2 className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
-            Income vs expense by month
-          </h2>
-          <div className="h-56">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Income vs expense by {chartPeriod}
+            </h2>
+            <PeriodToggle
+              period={chartPeriod}
+              setPeriod={setChartPeriod}
+              idPrefix="bar"
+              label="Income vs expense period"
+            />
+          </div>
+          <div className="h-40">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={reportsChartData}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} width={60} />
-                <Tooltip formatter={(value) => formatMoney(Number(value))} />
-                <Legend />
-                <Bar dataKey="Income" fill="#22c55e" animationDuration={700} animationEasing="ease-out" />
-                <Bar dataKey="Expense" fill="#ef4444" animationDuration={700} animationEasing="ease-out" />
+              <BarChart data={incomeExpenseChartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                <CartesianGrid
+                  vertical={false}
+                  strokeDasharray="0"
+                  className="stroke-slate-100 dark:stroke-slate-700/50"
+                />
+                <XAxis
+                  dataKey="period"
+                  tick={{ fontSize: 10, fill: 'currentColor' }}
+                  className="text-slate-400 dark:text-slate-500"
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis hide />
+                <Tooltip
+                  formatter={(value) => formatMoney(Number(value))}
+                  contentStyle={tooltipContentStyle}
+                  wrapperStyle={tooltipWrapperStyle}
+                />
+                <Bar
+                  dataKey="Income"
+                  fill="#22c55e"
+                  maxBarSize={18}
+                  radius={[3, 3, 0, 0]}
+                  animationDuration={700}
+                  animationEasing="ease-out"
+                />
+                <Bar
+                  dataKey="Expense"
+                  fill="#ef4444"
+                  maxBarSize={18}
+                  radius={[3, 3, 0, 0]}
+                  animationDuration={700}
+                  animationEasing="ease-out"
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
+          <ChartLegend items={[{ label: 'Income', color: '#22c55e' }, { label: 'Expense', color: '#ef4444' }]} />
         </Card>
       </motion.div>
+    </div>
+  )
+}
+
+/** Small inline chart legend (color dot + label), matching the color-dot
+ * convention already used for categories elsewhere in the app (Budgets.tsx,
+ * PickerGrid.tsx) rather than recharts' bulkier default <Legend>. */
+function ChartLegend({ items }: { items: { label: string; color?: string }[] }) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+      {items.map((item) => (
+        <span
+          key={item.label}
+          className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+          {item.label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** Small Week/Month segmented pill, matching the kind toggle in
+ * AddTransaction.tsx / Settings.tsx (pill container + sliding
+ * `motion.span` indicator via layoutId). `idPrefix` keeps each instance's
+ * layoutId independent so two toggles reflecting the same shared state
+ * don't fight over one shared layout animation. */
+function PeriodToggle({
+  period,
+  setPeriod,
+  idPrefix,
+  label,
+}: {
+  period: ChartPeriod
+  setPeriod: (p: ChartPeriod) => void
+  idPrefix: string
+  label: string
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="relative flex shrink-0 gap-1 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800"
+    >
+      {(['week', 'month'] as ChartPeriod[]).map((p) => (
+        <button
+          type="button"
+          key={p}
+          onClick={() => setPeriod(p)}
+          aria-pressed={period === p}
+          className={`relative z-10 rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
+            period === p ? 'text-white' : 'text-slate-600 dark:text-slate-300'
+          }`}
+        >
+          {period === p && (
+            <motion.span
+              layoutId={`${idPrefix}-period-pill`}
+              className="absolute inset-0 -z-10 rounded-md bg-indigo-600"
+              transition={{ type: 'spring', stiffness: 500, damping: 34 }}
+            />
+          )}
+          {p}
+        </button>
+      ))}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import type { Account, Category, Transaction, Transfer } from '../db'
-import { currentMonthKey } from './dates'
+import { currentMonthKey, currentWeekKey, startOfWeek, todayISO } from './dates'
 
 export function signedAmount(amount: number, kind: Category['kind']): number {
   return kind === 'income' ? amount : -amount
@@ -48,6 +48,23 @@ export function spentByCategoryThisMonth(
   const monthKey = currentMonthKey(today)
   return transactions
     .filter((t) => t.categoryId === categoryId && t.date.startsWith(monthKey))
+    .reduce((sum, t) => sum + t.amount, 0)
+}
+
+/** Sums this category's transaction amounts within the Monday-Sunday week
+ * containing `today` — mirrors spentByCategoryThisMonth exactly but bucketed
+ * by week instead of month. */
+export function spentByCategoryThisWeek(
+  transactions: Transaction[],
+  categoryId: number,
+  today: Date = new Date(),
+): number {
+  const weekStart = startOfWeek(today)
+  const weekStartKey = todayISO(weekStart)
+  const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6)
+  const weekEndKey = todayISO(weekEnd)
+  return transactions
+    .filter((t) => t.categoryId === categoryId && t.date >= weekStartKey && t.date <= weekEndKey)
     .reduce((sum, t) => sum + t.amount, 0)
 }
 
@@ -117,6 +134,52 @@ export function buildMonthlySeries(
     }
 
     points.push({ monthKey, income, expense, netWorth: startingTotal + cumulativeNet })
+  }
+
+  return points
+}
+
+export interface WeeklyPoint {
+  weekKey: string
+  income: number
+  expense: number
+}
+
+/** Mirrors buildMonthlySeries' structure and logic exactly but bucketed by
+ * week (via startOfWeek/currentWeekKey) instead of month. Net worth is
+ * intentionally out of scope for weekly buckets — a slow cumulative metric
+ * where weekly noise wouldn't be useful — so unlike MonthlyPoint, WeeklyPoint
+ * carries no netWorth field and `accounts` (kept only for call-shape parity
+ * with buildMonthlySeries) is unused here. */
+export function buildWeeklySeries(
+  _accounts: Account[],
+  transactions: Transaction[],
+  categoriesById: Map<number, Category>,
+  weeksBack = 8,
+  today: Date = new Date(),
+): WeeklyPoint[] {
+  const points: WeeklyPoint[] = []
+
+  for (let i = weeksBack - 1; i >= 0; i--) {
+    const weekAnchor = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i * 7)
+    const weekStart = startOfWeek(weekAnchor)
+    const weekKey = currentWeekKey(weekStart)
+    const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6)
+    const weekEndKey = todayISO(weekEnd)
+
+    let income = 0
+    let expense = 0
+
+    for (const t of transactions) {
+      const category = categoriesById.get(t.categoryId)
+      if (!category) continue
+      if (t.date >= weekKey && t.date <= weekEndKey && !category.system) {
+        if (category.kind === 'income') income += t.amount
+        else expense += t.amount
+      }
+    }
+
+    points.push({ weekKey, income, expense })
   }
 
   return points

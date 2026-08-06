@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Plus, Trash2, ChevronLeft, Check } from 'lucide-react'
-import db from '../db'
+import db, { type Category, type Transaction } from '../db'
 import { spentByCategoryThisMonth } from '../lib/finance'
 import { formatMoney } from '../lib/format'
+import { recommendBudget } from '../lib/budgetRecommendation'
+import type { AiTier } from '../lib/aiEngine'
 import Card from '../components/Card'
 import FlowStep from '../components/FlowStep'
 import StepDots from '../components/StepDots'
@@ -99,18 +101,65 @@ export default function Budgets() {
         })}
       </AnimatePresence>
 
-      {availableCategories.length > 0 && <AddBudgetFlow categories={availableCategories} />}
+      {availableCategories.length > 0 && (
+        <AddBudgetFlow categories={availableCategories} transactions={transactions ?? []} />
+      )}
     </motion.div>
   )
 }
 
-function AddBudgetFlow({ categories }: { categories: { id: number; name: string; color: string }[] }) {
+function AddBudgetFlow({
+  categories,
+  transactions,
+}: {
+  categories: Category[]
+  transactions: Transaction[]
+}) {
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState(0)
   const [direction, setDirection] = useState(1)
   const [categoryId, setCategoryId] = useState<number | ''>('')
   const [limit, setLimit] = useState('')
   const [saved, setSaved] = useState(false)
+  const [recommendation, setRecommendation] = useState<{
+    suggestedAmount: number | null
+    reason: string
+    tier: AiTier
+  } | null>(null)
+  const [recommendationLoading, setRecommendationLoading] = useState(false)
+
+  const category = categories.find((c) => c.id === categoryId)
+
+  // Fetches a budget suggestion for the newly-chosen category as soon as it's
+  // picked, so it's ready (or already loading) by the time the limit step is
+  // shown. Depends on the `category` object itself (stable by reference
+  // across re-renders as long as the underlying record hasn't changed) and
+  // `transactions` rather than `categoryId` alone, so a real change in either
+  // — not just a re-render of the parent's filtered category list — is what
+  // triggers a refetch.
+  useEffect(() => {
+    if (!category) {
+      setRecommendation(null)
+      setRecommendationLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setRecommendation(null)
+    setRecommendationLoading(true)
+
+    recommendBudget(category, transactions)
+      .then((result) => {
+        if (!cancelled) setRecommendation(result)
+      })
+      .finally(() => {
+        if (!cancelled) setRecommendationLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [category, transactions])
 
   function openFlow() {
     setStep(0)
@@ -118,6 +167,8 @@ function AddBudgetFlow({ categories }: { categories: { id: number; name: string;
     setCategoryId('')
     setLimit('')
     setSaved(false)
+    setRecommendation(null)
+    setRecommendationLoading(false)
     setOpen(true)
   }
 
@@ -141,8 +192,6 @@ function AddBudgetFlow({ categories }: { categories: { id: number; name: string;
     setSaved(true)
     setTimeout(() => setOpen(false), 500)
   }
-
-  const category = categories.find((c) => c.id === categoryId)
 
   return (
     <Card className="col-span-2 overflow-hidden">
@@ -194,6 +243,42 @@ function AddBudgetFlow({ categories }: { categories: { id: number; name: string;
                       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: category?.color }} />
                       {category?.name}
                     </p>
+
+                    <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-800/60">
+                      {recommendationLoading && (
+                        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                          <div
+                            className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600 dark:border-slate-700 dark:border-t-indigo-400"
+                            role="status"
+                            aria-label="Loading suggestion"
+                          />
+                          Working out a suggestion…
+                        </div>
+                      )}
+                      {!recommendationLoading && recommendation && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-xs text-slate-600 dark:text-slate-400">{recommendation.reason}</p>
+                            {recommendation.tier !== 'template' && (
+                              <span className="inline-flex shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                AI-enhanced
+                              </span>
+                            )}
+                          </div>
+                          {recommendation.suggestedAmount !== null && (
+                            <motion.button
+                              {...tapScale}
+                              type="button"
+                              onClick={() => setLimit(String(recommendation.suggestedAmount))}
+                              className="inline-flex rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:bg-indigo-950/60 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
+                            >
+                              Use {formatMoney(recommendation.suggestedAmount)}
+                            </motion.button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     <input
                       type="number"
                       inputMode="decimal"

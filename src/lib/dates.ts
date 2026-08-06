@@ -22,3 +22,19 @@ export function parseISODate(iso: string): Date {
   const [year, month, day] = iso.split('-').map(Number)
   return new Date(year, month - 1, day)
 }
+
+/** Returns the Monday of the Monday-start calendar week containing the given
+ * date (time-of-day stripped). */
+export function startOfWeek(date: Date): Date {
+  const result = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const day = result.getDay() // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+  const daysSinceMonday = (day + 6) % 7
+  result.setDate(result.getDate() - daysSinceMonday)
+  return result
+}
+
+/** Returns the ISO 'yyyy-MM-dd' of the Monday of the week containing `date` —
+ * a sortable week-bucket key, mirroring how currentMonthKey buckets months. */
+export function currentWeekKey(date: Date = new Date()): string {
+  return todayISO(startOfWeek(date))
+}
