@@ -311,7 +311,7 @@ export default function CommandBar() {
       <motion.button
         {...tapScale}
         onClick={openBar}
-        className="absolute bottom-6 right-4 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-900/30"
+        className="absolute bottom-6 right-4 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-brand-from to-brand-to text-white shadow-lg shadow-violet-900/40"
         aria-label="Quick command"
       >
         <Sparkles size={20} />
@@ -325,14 +325,14 @@ export default function CommandBar() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={closeBar}
-              className="absolute inset-0 z-30 bg-black/40"
+              className="absolute inset-0 z-30 bg-black/40 backdrop-blur-sm"
             />
             <motion.div
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', stiffness: 420, damping: 40 }}
-              className="absolute inset-x-0 bottom-0 z-40 rounded-t-2xl bg-white p-4 pb-6 shadow-2xl dark:bg-slate-900"
+              className="absolute inset-x-0 bottom-0 z-40 rounded-t-3xl border-t border-slate-200/70 bg-white p-5 pb-7 shadow-2xl dark:border-slate-800/70 dark:bg-slate-900"
             >
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -396,7 +396,7 @@ export default function CommandBar() {
                       resetFuzzyGate()
                     }}
                     placeholder='Try "expense 200 groceries"'
-                    className="w-full rounded-lg border border-slate-300 px-3 py-3 text-base dark:border-slate-700 dark:bg-slate-800"
+                    className="w-full rounded-xl border border-slate-300 px-3.5 py-3 text-base transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                   />
 
                   <AnimatePresence mode="wait" initial={false}>
@@ -406,7 +406,7 @@ export default function CommandBar() {
                         initial={{ opacity: 0, y: -4 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0 }}
-                        className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
+                        className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm ${
                           parsed.type === 'unrecognized'
                             ? 'bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200'
                             : 'bg-indigo-50 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200'
@@ -423,7 +423,7 @@ export default function CommandBar() {
                         initial={{ opacity: 0, y: -4 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0 }}
-                        className={`space-y-1.5 rounded-lg px-3 py-2 text-sm ${
+                        className={`space-y-1.5 rounded-xl px-3 py-2 text-sm ${
                           result.ok
                             ? 'bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200'
                             : 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300'
@@ -470,7 +470,7 @@ export default function CommandBar() {
                     <motion.div
                       initial={{ opacity: 0, y: -4 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="space-y-1.5 rounded-lg bg-red-50 px-3 py-2 text-sm dark:bg-red-950"
+                      className="space-y-1.5 rounded-xl bg-red-50 px-3 py-2 text-sm dark:bg-red-950"
                     >
                       <p className="flex items-center gap-1.5 text-xs font-medium text-red-800 dark:text-red-200">
                         <AlertTriangle size={13} className="shrink-0" />
@@ -499,7 +499,7 @@ export default function CommandBar() {
                     <motion.div
                       initial={{ opacity: 0, y: -4 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="space-y-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm dark:bg-amber-950"
+                      className="space-y-1.5 rounded-xl bg-amber-50 px-3 py-2 text-sm dark:bg-amber-950"
                     >
                       <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800 dark:text-amber-200">
                         <HelpCircle size={13} className="shrink-0" />
@@ -511,7 +511,7 @@ export default function CommandBar() {
                         return (
                           <div
                             key={field}
-                            className="flex items-center justify-between gap-2 rounded-md bg-white px-2.5 py-1.5 dark:bg-slate-800"
+                            className="flex items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 dark:bg-slate-800"
                           >
                             <span className="text-slate-700 dark:text-slate-300">
                               {fuzzyFieldLabel(field)}: <strong>{fuzzyFieldEntityName(field, id)}</strong>
@@ -548,7 +548,7 @@ export default function CommandBar() {
                       pendingFuzzyFields.length > 0 ||
                       needsDestructiveConfirm
                     }
-                    className="w-full rounded-lg bg-indigo-600 py-3 font-medium text-white disabled:opacity-40"
+                    className="w-full rounded-xl bg-linear-to-br from-brand-from to-brand-to py-3 font-semibold text-white shadow-md shadow-violet-900/30 disabled:opacity-40 disabled:shadow-none"
                   >
                     {busy
                       ? 'Working…'

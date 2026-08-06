@@ -85,14 +85,14 @@ export default function Budgets() {
               <p
                 className={`mt-2 text-xs ${over ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}
               >
-                {formatMoney(spent)} spent
+                <span className="tabular-money">{formatMoney(spent)}</span> spent
               </p>
               <input
                 type="number"
                 step="0.01"
                 defaultValue={budget.monthlyLimit}
                 onBlur={(e) => updateLimit(budget.id, e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800"
+                className="mt-1 w-full rounded-xl border border-slate-300 px-2 py-1 text-sm tabular-money transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
               />
             </Card>
           )
@@ -203,7 +203,7 @@ function AddBudgetFlow({ categories }: { categories: { id: number; name: string;
                       value={limit}
                       onChange={(e) => setLimit(e.target.value)}
                       placeholder="Monthly limit"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-3 text-2xl dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-3 text-2xl tabular-money transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <motion.button
                       {...tapScale}
@@ -211,7 +211,7 @@ function AddBudgetFlow({ categories }: { categories: { id: number; name: string;
                       disabled={!(Number(limit) > 0)}
                       onClick={save}
                       animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg py-3 font-medium text-white disabled:opacity-40"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl py-3 font-semibold text-white disabled:opacity-40"
                     >
                       <AnimatePresence mode="wait" initial={false}>
                         {saved ? (

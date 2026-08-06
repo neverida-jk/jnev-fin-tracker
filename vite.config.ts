@@ -5,6 +5,24 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        // Force these into their own vendor chunks regardless of how the
+        // automatic heuristic happens to group things route-to-route (it
+        // previously split dexie into its own chunk on its own, but that
+        // was an accidental side effect of the exact set of lazy routes
+        // importing it — removing a route was enough to tip it back into
+        // the main entry chunk). Keeping the entry chunk small matters
+        // since it loads on every single page view.
+        manualChunks(id) {
+          if (id.includes('node_modules/dexie')) return 'dexie'
+          if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) return 'recharts'
+          if (id.includes('node_modules/framer-motion')) return 'framer-motion'
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),

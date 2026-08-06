@@ -236,14 +236,14 @@ function AccountCard({
               autoFocus
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800"
+              className="min-w-0 flex-1 rounded-xl border border-slate-300 px-2 py-1 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
             />
             <motion.button
               {...tapScale}
               type="button"
               onClick={saveRename}
               aria-label="Save name"
-              className="rounded-md bg-indigo-600 p-1.5 text-white"
+              className="rounded-lg bg-indigo-600 p-1.5 text-white"
             >
               <Check size={14} />
             </motion.button>
@@ -252,7 +252,7 @@ function AccountCard({
               type="button"
               onClick={() => setRenaming(false)}
               aria-label="Cancel rename"
-              className="rounded-md bg-slate-100 p-1.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+              className="rounded-lg bg-slate-100 p-1.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
             >
               <X size={14} />
             </motion.button>
@@ -264,7 +264,7 @@ function AccountCard({
           </div>
         )}
 
-        <span className="font-semibold tabular-nums text-slate-800 dark:text-slate-200">
+        <span className="tabular-money font-semibold text-slate-800 dark:text-slate-200">
           {formatMoney(balance)}
         </span>
 
@@ -317,8 +317,8 @@ function AccountCard({
                         <span
                           className={
                             h.signed < 0
-                              ? 'shrink-0 text-red-600 dark:text-red-400'
-                              : 'shrink-0 text-green-600 dark:text-green-400'
+                              ? 'tabular-money shrink-0 text-red-600 dark:text-red-400'
+                              : 'tabular-money shrink-0 text-green-600 dark:text-green-400'
                           }
                         >
                           {h.signed < 0 ? '-' : '+'}
@@ -411,7 +411,7 @@ function TransactionEditForm({
         min="0"
         value={amount}
         onChange={(e) => setAmount(e.target.value)}
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
       />
 
       <div className="flex flex-wrap gap-1.5">
@@ -441,7 +441,7 @@ function TransactionEditForm({
         type="date"
         value={date}
         onChange={(e) => setDate(e.target.value)}
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
       />
 
       <label htmlFor={`edit-note-${transaction.id}`} className="sr-only">
@@ -453,7 +453,7 @@ function TransactionEditForm({
         value={note}
         onChange={(e) => setNote(e.target.value)}
         placeholder="Note (optional)"
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
       />
 
       {error && (
@@ -467,7 +467,7 @@ function TransactionEditForm({
           {...tapScale}
           type="button"
           onClick={remove}
-          className="flex items-center justify-center gap-1 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 dark:bg-red-500/10 dark:text-red-400"
+          className="flex items-center justify-center gap-1 rounded-xl bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 dark:bg-red-500/10 dark:text-red-400"
         >
           <Trash2 size={13} /> Delete
         </motion.button>
@@ -476,7 +476,7 @@ function TransactionEditForm({
           type="button"
           onClick={save}
           animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-medium text-white"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-1.5 text-xs font-semibold text-white"
         >
           <AnimatePresence mode="wait" initial={false}>
             {saved ? (
@@ -597,7 +597,7 @@ function AddAccountFlow() {
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       autoFocus
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <input
                       type="number"
@@ -605,7 +605,7 @@ function AddAccountFlow() {
                       placeholder="Starting balance (optional)"
                       value={startingBalance}
                       onChange={(e) => setStartingBalance(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <motion.button
                       {...tapScale}
@@ -613,7 +613,7 @@ function AddAccountFlow() {
                       disabled={!name.trim()}
                       onClick={save}
                       animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg py-3 font-medium text-white disabled:opacity-40"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl py-3 font-semibold text-white disabled:opacity-40"
                     >
                       <AnimatePresence mode="wait" initial={false}>
                         {saved ? (
@@ -695,28 +695,28 @@ function AddBalanceForm({ accountId }: { accountId: number }) {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="Amount to add"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
             />
             <input
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Note (optional)"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
             />
             <div className="flex gap-2">
               <motion.button
                 {...tapScale}
                 type="button"
                 onClick={() => setOpen(false)}
-                className="flex-1 rounded-lg bg-slate-100 py-1.5 text-xs dark:bg-slate-800"
+                className="flex-1 rounded-xl bg-slate-100 py-1.5 text-xs dark:bg-slate-800"
               >
                 Cancel
               </motion.button>
               <motion.button
                 {...tapScale}
                 type="submit"
-                className="flex-1 rounded-lg bg-indigo-600 py-1.5 text-xs font-medium text-white"
+                className="flex-1 rounded-xl bg-linear-to-br from-brand-from to-brand-to py-1.5 text-xs font-semibold text-white shadow-sm shadow-violet-900/30"
               >
                 Add balance
               </motion.button>
@@ -870,20 +870,20 @@ function TransferMoney({ accounts }: { accounts: Account[] }) {
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
                       placeholder="0.00"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-3 text-2xl dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-3 text-2xl tabular-money transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <input
                       type="date"
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <input
                       type="text"
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
                       placeholder="Note (optional)"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <motion.button
                       {...tapScale}
@@ -891,7 +891,7 @@ function TransferMoney({ accounts }: { accounts: Account[] }) {
                       disabled={!(numericAmount > 0)}
                       onClick={save}
                       animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg py-3 font-medium text-white disabled:opacity-40"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl py-3 font-semibold text-white disabled:opacity-40"
                     >
                       <AnimatePresence mode="wait" initial={false}>
                         {saved ? (

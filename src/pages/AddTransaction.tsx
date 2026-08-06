@@ -156,7 +156,7 @@ export default function AddTransaction() {
           {isPayout && step === 0 && (
             <FlowStep key="payout-amount" direction={direction}>
               {schedule && (
-                <div className="mb-4 rounded-lg bg-indigo-50 px-3 py-2 text-sm text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200">
+                <div className="mb-4 rounded-xl bg-indigo-50 px-3 py-2 text-sm text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200">
                   Logging your <strong>{schedule.label}</strong> payout — just enter the amount.
                 </div>
               )}
@@ -209,20 +209,20 @@ function AmountStep({
   return (
     <div className="space-y-4">
       {!lockedKind && setKind && (
-        <div className="relative flex gap-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+        <div className="relative flex gap-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
           {(['expense', 'income'] as CategoryKind[]).map((k) => (
             <button
               type="button"
               key={k}
               onClick={() => setKind(k)}
-              className={`relative z-10 flex-1 rounded-md py-2 text-sm font-medium capitalize transition-colors ${
+              className={`relative z-10 flex-1 rounded-lg py-2 text-sm font-medium capitalize transition-colors ${
                 kind === k ? 'text-white' : 'text-slate-600 dark:text-slate-300'
               }`}
             >
               {kind === k && (
                 <motion.span
                   layoutId="kind-pill"
-                  className="absolute inset-0 -z-10 rounded-md bg-indigo-600"
+                  className="absolute inset-0 -z-10 rounded-lg bg-indigo-600"
                   transition={{ type: 'spring', stiffness: 500, damping: 34 }}
                 />
               )}
@@ -245,7 +245,7 @@ function AmountStep({
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.00"
-          className="w-full rounded-lg border border-slate-300 px-3 py-3 text-2xl dark:border-slate-700 dark:bg-slate-800"
+          className="w-full rounded-xl border border-slate-300 px-3 py-3 text-2xl tabular-money transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
         />
       </div>
 
@@ -254,7 +254,7 @@ function AmountStep({
         type="button"
         disabled={!valid}
         onClick={onNext}
-        className="w-full rounded-lg bg-indigo-600 py-3 font-medium text-white disabled:opacity-40"
+        className="w-full rounded-xl bg-linear-to-br from-brand-from to-brand-to py-3 font-semibold text-white shadow-md shadow-violet-900/30 disabled:opacity-40 disabled:shadow-none"
       >
         Next
       </motion.button>
@@ -287,7 +287,7 @@ function ConfirmStep({
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+          className="w-full rounded-xl border border-slate-300 px-3 py-2 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
         />
       </div>
 
@@ -300,7 +300,7 @@ function ConfirmStep({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="Optional"
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+          className="w-full rounded-xl border border-slate-300 px-3 py-2 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
         />
       </div>
 
@@ -309,7 +309,7 @@ function ConfirmStep({
         type="button"
         onClick={onSave}
         animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
-        className="flex w-full items-center justify-center gap-2 rounded-lg py-3 font-medium text-white"
+        className="flex w-full items-center justify-center gap-2 rounded-xl py-3 font-semibold text-white"
       >
         <AnimatePresence mode="wait" initial={false}>
           {saved ? (

@@ -12,7 +12,6 @@ const AddTransaction = lazy(() => import('./pages/AddTransaction'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const Budgets = lazy(() => import('./pages/Budgets'))
 const Bills = lazy(() => import('./pages/Bills'))
-const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
 
 const titles: Record<string, string> = {
@@ -21,7 +20,6 @@ const titles: Record<string, string> = {
   '/accounts': 'Accounts',
   '/budgets': 'Budgets',
   '/bills': 'Bills & Payouts',
-  '/reports': 'Reports',
   '/settings': 'Settings',
 }
 
@@ -63,7 +61,6 @@ function App() {
               <Route path="/accounts" element={<PageTransition><Accounts /></PageTransition>} />
               <Route path="/budgets" element={<PageTransition><Budgets /></PageTransition>} />
               <Route path="/bills" element={<PageTransition><Bills /></PageTransition>} />
-              <Route path="/reports" element={<PageTransition><Reports /></PageTransition>} />
               <Route path="/settings" element={<PageTransition><Settings /></PageTransition>} />
             </Routes>
           </AnimatePresence>

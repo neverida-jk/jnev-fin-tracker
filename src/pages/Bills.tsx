@@ -184,14 +184,14 @@ function AddPayoutScheduleFlow({
                       value={label}
                       onChange={(e) => setLabel(e.target.value)}
                       autoFocus
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <motion.button
                       {...tapScale}
                       type="button"
                       disabled={!label.trim()}
                       onClick={goNext}
-                      className="w-full rounded-lg bg-indigo-600 py-3 font-medium text-white disabled:opacity-40"
+                      className="w-full rounded-xl bg-linear-to-br from-brand-from to-brand-to py-3 font-medium text-white shadow-md shadow-violet-900/30 disabled:opacity-40 disabled:shadow-none"
                     >
                       Next
                     </motion.button>
@@ -228,7 +228,7 @@ function AddPayoutScheduleFlow({
               {step === 3 && (
                 <FlowStep key="confirm" direction={direction}>
                   <div className="space-y-3">
-                    <div className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800/60">
+                    <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800/60">
                       <p className="font-medium text-slate-800 dark:text-slate-200">{label}</p>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         {account?.name} · {category?.name}
@@ -239,7 +239,7 @@ function AddPayoutScheduleFlow({
                       type="button"
                       onClick={save}
                       animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg py-3 font-medium text-white"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl py-3 font-medium text-white"
                     >
                       <AnimatePresence mode="wait" initial={false}>
                         {saved ? (
@@ -470,7 +470,7 @@ function AddRecurringBillFlow({
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       autoFocus
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <input
                       type="number"
@@ -480,14 +480,14 @@ function AddRecurringBillFlow({
                       placeholder="Amount"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-lg dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-lg transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <motion.button
                       {...tapScale}
                       type="button"
                       disabled={!nameAmountValid}
                       onClick={goNext}
-                      className="w-full rounded-lg bg-indigo-600 py-3 font-medium text-white disabled:opacity-40"
+                      className="w-full rounded-xl bg-linear-to-br from-brand-from to-brand-to py-3 font-medium text-white shadow-md shadow-violet-900/30 disabled:opacity-40 disabled:shadow-none"
                     >
                       Next
                     </motion.button>
@@ -508,13 +508,13 @@ function AddRecurringBillFlow({
                       autoFocus
                       value={dueDay}
                       onChange={(e) => setDueDay(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-lg dark:border-slate-700 dark:bg-slate-800"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-lg transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <motion.button
                       {...tapScale}
                       type="button"
                       onClick={goNext}
-                      className="w-full rounded-lg bg-indigo-600 py-3 font-medium text-white"
+                      className="w-full rounded-xl bg-linear-to-br from-brand-from to-brand-to py-3 font-medium text-white shadow-md shadow-violet-900/30"
                     >
                       Next
                     </motion.button>
@@ -551,7 +551,7 @@ function AddRecurringBillFlow({
               {step === 4 && (
                 <FlowStep key="confirm" direction={direction}>
                   <div className="space-y-3">
-                    <div className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800/60">
+                    <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800/60">
                       <p className="font-medium text-slate-800 dark:text-slate-200">{name}</p>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         {formatMoney(Number(amount) || 0)} · due day {dueDay} · {account?.name} ·{' '}
@@ -563,7 +563,7 @@ function AddRecurringBillFlow({
                       type="button"
                       onClick={save}
                       animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg py-3 font-medium text-white"
+                      className="flex w-full items-center justify-center gap-2 rounded-xl py-3 font-medium text-white"
                     >
                       <AnimatePresence mode="wait" initial={false}>
                         {saved ? (

@@ -49,10 +49,12 @@ export default function StatusStrip() {
       : `Net worth ${formatMoney(worth)}`
 
   return (
-    <div className="shrink-0 border-t border-slate-200 bg-white px-4 py-1.5 dark:border-slate-800 dark:bg-slate-900">
+    <div className="shrink-0 border-t border-slate-200/70 bg-white/80 px-4 py-2 backdrop-blur-md dark:border-slate-800/70 dark:bg-slate-900/80">
       {/* pr-20 keeps text clear of the Quick Command FAB (h-12 button at
           bottom-6 right-4), so the strip never overlaps or competes with it. */}
-      <p className="truncate pr-20 text-[11px] text-slate-400 dark:text-slate-500">{summary}</p>
+      <p className="truncate pr-20 text-[11px] font-medium tracking-wide text-slate-400 dark:text-slate-500">
+        {summary}
+      </p>
     </div>
   )
 }

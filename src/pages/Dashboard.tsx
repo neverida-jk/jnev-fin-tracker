@@ -2,12 +2,26 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  BarChart,
+  Bar,
+  Legend,
+} from 'recharts'
+import {
   TrendingUp,
   Plus,
   Wallet,
   PiggyBank,
   CalendarClock,
-  BarChart3,
   AlertTriangle,
   Sparkles,
   Newspaper,
@@ -18,7 +32,7 @@ import PendingPayoutBanner from '../components/PendingPayoutBanner'
 import AnimatedMoney from '../components/AnimatedMoney'
 import Tile from '../components/Tile'
 import Card from '../components/Card'
-import { formatMoney } from '../lib/format'
+import { formatMoney, formatMonthLabel } from '../lib/format'
 import { netWorth, spentByCategoryThisMonth, buildMonthlySeries } from '../lib/finance'
 import { buildFinancialContext, composePersonalizedHighlight } from '../lib/financialContext'
 import { detectUnusualSpend } from '../lib/anomalyDetection'
@@ -61,6 +75,25 @@ export default function Dashboard() {
   const budgetsSpan = (budgets?.length ?? 0) > 0 ? 'col-span-2' : 'col-span-1'
   const billsSpan = upcomingBills.length > 1 ? 'col-span-2' : 'col-span-1'
 
+  // Reports & trends charts, relocated from the former /reports page —
+  // data-building logic below is unchanged, just moved.
+  const expenseCategories = (categories ?? []).filter((c) => c.kind === 'expense')
+  const pieData = expenseCategories
+    .map((c) => ({
+      name: c.name,
+      value: spentByCategoryThisMonth(transactions ?? [], c.id),
+      color: c.color,
+    }))
+    .filter((d) => d.value > 0)
+
+  const reportsSeries = loading ? [] : buildMonthlySeries(accounts, transactions, categoriesById, 6)
+  const reportsChartData = reportsSeries.map((p) => ({
+    month: formatMonthLabel(p.monthKey),
+    Income: p.income,
+    Expense: p.expense,
+    'Net worth': p.netWorth,
+  }))
+
   const monthInReviewInput: MonthInReviewInput = {
     transactions: transactions ?? [],
     categories: categories ?? [],
@@ -79,7 +112,7 @@ export default function Dashboard() {
         animate="show"
         className="mx-4 mt-4 grid grid-flow-row-dense grid-cols-2 gap-3"
       >
-        <Tile to="/reports" tone="dark" variants={fadeUpItem} className="col-span-2">
+        <Tile to="/accounts" tone="dark" variants={fadeUpItem} className="col-span-2">
           <div className="flex items-center gap-2 text-slate-300">
             <TrendingUp size={14} />
             <p className="text-xs uppercase tracking-wide">Net worth</p>
@@ -87,7 +120,7 @@ export default function Dashboard() {
           {loading ? (
             <p className="mt-1 text-3xl font-semibold">—</p>
           ) : (
-            <AnimatedMoney value={worth} className="mt-1 block text-3xl font-semibold tabular-nums" />
+            <AnimatedMoney value={worth} className="mt-1 block text-3xl font-semibold" />
           )}
           {insightMessage && (
             <p className="mt-3 flex items-start gap-1.5 text-xs text-slate-300">
@@ -112,7 +145,7 @@ export default function Dashboard() {
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {loading ? '—' : `${accounts.length} account${accounts.length === 1 ? '' : 's'}`}
             </p>
-            <p className="text-lg font-semibold tabular-nums text-slate-800 dark:text-slate-200">
+            <p className="tabular-money text-lg font-semibold text-slate-800 dark:text-slate-200">
               {loading ? '—' : formatMoney(worth)}
             </p>
           </div>
@@ -179,13 +212,13 @@ export default function Dashboard() {
                 ({ bill, dueDate }) => (
                   <li
                     key={bill.id}
-                    className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60"
+                    className="min-w-0 rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60"
                   >
-                    <span className="text-slate-700 dark:text-slate-300">{bill.name}</span>
-                    <span className="text-slate-500 dark:text-slate-400">
-                      {formatMoney(bill.amount)} ·{' '}
+                    <p className="truncate min-w-0 text-slate-700 dark:text-slate-300">{bill.name}</p>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      {formatMoney(bill.amount)} · due{' '}
                       {dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </span>
+                    </p>
                   </li>
                 ),
               )}
@@ -193,14 +226,89 @@ export default function Dashboard() {
           )}
         </Tile>
 
-        <Tile to="/reports" variants={fadeUpItem} className="col-span-1 justify-between">
-          <BarChart3 size={20} className="text-indigo-500" />
-          <p className="mt-6 text-sm font-semibold text-slate-800 dark:text-slate-200">
-            Reports & trends
-          </p>
-        </Tile>
-
         <MonthInReviewTile input={monthInReviewInput} />
+      </motion.div>
+
+      <motion.div
+        variants={staggerContainer}
+        initial="hidden"
+        animate="show"
+        className="mx-4 mt-3 space-y-3"
+      >
+        <Card tone="default" variants={fadeUpItem}>
+          <h2 className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
+            Spend by category (this month)
+          </h2>
+          {pieData.length === 0 ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400">No expenses logged yet this month.</p>
+          ) : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={50}
+                    outerRadius={80}
+                    animationDuration={700}
+                    animationEasing="ease-out"
+                  >
+                    {pieData.map((d) => (
+                      <Cell key={d.name} fill={d.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => formatMoney(Number(value))} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+
+        <Card tone="default" variants={fadeUpItem}>
+          <h2 className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
+            Net worth over time
+          </h2>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={reportsChartData}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} width={60} />
+                <Tooltip formatter={(value) => formatMoney(Number(value))} />
+                <Line
+                  type="monotone"
+                  dataKey="Net worth"
+                  stroke="#4f46e5"
+                  strokeWidth={2}
+                  dot={false}
+                  animationDuration={800}
+                  animationEasing="ease-out"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        <Card tone="default" variants={fadeUpItem}>
+          <h2 className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
+            Income vs expense by month
+          </h2>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={reportsChartData}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} width={60} />
+                <Tooltip formatter={(value) => formatMoney(Number(value))} />
+                <Legend />
+                <Bar dataKey="Income" fill="#22c55e" animationDuration={700} animationEasing="ease-out" />
+                <Bar dataKey="Expense" fill="#ef4444" animationDuration={700} animationEasing="ease-out" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
       </motion.div>
     </div>
   )

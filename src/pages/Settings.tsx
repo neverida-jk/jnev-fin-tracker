@@ -160,7 +160,7 @@ function BackupSection() {
           type="button"
           onClick={handleExport}
           disabled={exporting}
-          className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-linear-to-br from-brand-from to-brand-to py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-900/30 disabled:opacity-40 disabled:shadow-none"
         >
           {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           Export backup
@@ -171,7 +171,7 @@ function BackupSection() {
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={importing}
-          className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-300 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-300 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
         >
           <Upload size={16} />
           Import backup
@@ -190,7 +190,7 @@ function BackupSection() {
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
-          className="mt-4 overflow-hidden rounded-lg border border-red-300 bg-red-50 p-3 dark:border-red-800/60 dark:bg-red-950/40"
+          className="mt-4 overflow-hidden rounded-xl border border-red-300 bg-red-50 p-3 dark:border-red-800/60 dark:bg-red-950/40"
         >
           <div className="flex items-start gap-2">
             <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-600 dark:text-red-400" />
@@ -210,7 +210,7 @@ function BackupSection() {
               type="button"
               onClick={confirmImport}
               disabled={importing}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               {importing && <Loader2 size={14} className="animate-spin" />}
               Yes, replace all data
@@ -219,7 +219,7 @@ function BackupSection() {
               type="button"
               onClick={cancelImport}
               disabled={importing}
-              className="flex-1 rounded-lg border border-slate-300 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+              className="flex-1 rounded-xl border border-slate-300 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
             >
               Cancel
             </button>
@@ -360,14 +360,14 @@ function CategoryRow({ category }: { category: Category }) {
               autoFocus
               value={nameValue}
               onChange={(e) => setNameValue(e.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800"
+              className="min-w-0 flex-1 rounded-xl border border-slate-300 px-2 py-1 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
             />
             <motion.button
               {...tapScale}
               type="button"
               onClick={saveEdit}
               aria-label="Save category"
-              className="rounded-md bg-indigo-600 p-1.5 text-white"
+              className="rounded-lg bg-indigo-600 p-1.5 text-white"
             >
               <Check size={14} />
             </motion.button>
@@ -376,7 +376,7 @@ function CategoryRow({ category }: { category: Category }) {
               type="button"
               onClick={() => setEditing(false)}
               aria-label="Cancel edit"
-              className="rounded-md bg-slate-100 p-1.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+              className="rounded-lg bg-slate-100 p-1.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
             >
               <X size={14} />
             </motion.button>
@@ -514,21 +514,21 @@ function AddCategoryForm() {
             </button>
           </div>
 
-          <div className="relative flex gap-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+          <div className="relative flex gap-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
             {(['expense', 'income'] as CategoryKind[]).map((k) => (
               <button
                 type="button"
                 key={k}
                 onClick={() => setKind(k)}
                 aria-pressed={kind === k}
-                className={`relative z-10 flex-1 rounded-md py-2 text-sm font-medium capitalize transition-colors ${
+                className={`relative z-10 flex-1 rounded-lg py-2 text-sm font-medium capitalize transition-colors ${
                   kind === k ? 'text-white' : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
                 {kind === k && (
                   <motion.span
                     layoutId="new-category-kind-pill"
-                    className="absolute inset-0 -z-10 rounded-md bg-indigo-600"
+                    className="absolute inset-0 -z-10 rounded-lg bg-indigo-600"
                     transition={{ type: 'spring', stiffness: 500, damping: 34 }}
                   />
                 )}
@@ -547,7 +547,7 @@ function AddCategoryForm() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Category name"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
           />
 
           <ColorSwatchPicker value={color} onChange={setColor} />
@@ -564,7 +564,7 @@ function AddCategoryForm() {
             disabled={!name.trim()}
             onClick={handleAdd}
             animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
-            className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-40"
           >
             <AnimatePresence mode="wait" initial={false}>
               {saved ? (
@@ -780,24 +780,24 @@ function TeachWordForm() {
             value={phrase}
             onChange={(e) => setPhrase(e.target.value)}
             placeholder="e.g. grab, gcash, tita's carinderia"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
           />
 
-          <div className="relative flex gap-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+          <div className="relative flex gap-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
             {(['category', 'account'] as CommandAlias['entityType'][]).map((type) => (
               <button
                 type="button"
                 key={type}
                 onClick={() => selectType(type)}
                 aria-pressed={entityType === type}
-                className={`relative z-10 flex-1 rounded-md py-2 text-sm font-medium capitalize transition-colors ${
+                className={`relative z-10 flex-1 rounded-lg py-2 text-sm font-medium capitalize transition-colors ${
                   entityType === type ? 'text-white' : 'text-slate-600 dark:text-slate-300'
                 }`}
               >
                 {entityType === type && (
                   <motion.span
                     layoutId="teach-word-type-pill"
-                    className="absolute inset-0 -z-10 rounded-md bg-indigo-600"
+                    className="absolute inset-0 -z-10 rounded-lg bg-indigo-600"
                     transition={{ type: 'spring', stiffness: 500, damping: 34 }}
                   />
                 )}
@@ -837,7 +837,7 @@ function TeachWordForm() {
             disabled={!phrase.trim() || entityId === null}
             onClick={handleTeach}
             animate={saved ? { backgroundColor: '#16a34a' } : { backgroundColor: '#4f46e5' }}
-            className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-40"
           >
             <AnimatePresence mode="wait" initial={false}>
               {saved ? (
@@ -987,7 +987,7 @@ function StorageSection() {
               type="button"
               onClick={handleRequestPersist}
               disabled={requesting}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
             >
               {requesting && <Loader2 size={14} className="animate-spin" />}
               Request persistent storage
@@ -1057,7 +1057,7 @@ function AiSection() {
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700/60">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700/60">
             <div className="min-w-0 pr-2">
               <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Local AI model</p>
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">

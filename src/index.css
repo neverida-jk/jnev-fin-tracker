@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* Signature brand gradient — a refined indigo-to-violet pair, used for the
+   "dark" hero tile/card and the "solid" primary-CTA tone (see Card.tsx /
+   Tile.tsx tone maps and CommandBar.tsx's FAB + submit button). Defining it
+   once here means every gradient in the app is literally the same two
+   stops, rather than four screens each picking their own indigo. Consumed
+   as `from-brand-from to-brand-to` (Tailwind auto-derives bg-/text-/border-/
+   from-/via-/to- utilities from any --color-* theme token). */
+@theme {
+  --color-brand-from: #6366f1; /* indigo-500 */
+  --color-brand-to: #7c3aed; /* violet-600 */
+}
+
 :root {
   color-scheme: light dark;
 }
@@ -13,6 +25,9 @@ body {
   @apply bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
   font: 16px/1.45 system-ui, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* Slightly denser type reads more "app", less "document" — applied
+     globally, refined further for money figures below via .tabular-money. */
+  letter-spacing: -0.01em;
 }
 
 #root {
@@ -27,4 +42,16 @@ body {
 
 input, select, textarea {
   font: inherit;
+}
+
+/* The house style for every rendered money amount (see AnimatedMoney.tsx,
+   the component that owns this treatment) — tabular figures so digits don't
+   jitter/reflow as amounts animate or update, plus a touch of negative
+   tracking for the bold, oversized-numeral look common to fintech apps.
+   Size and weight stay contextual (hero vs. inline) and are layered on top
+   with ordinary utilities, e.g. `tabular-money text-3xl font-bold`. */
+@utility tabular-money {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.02em;
 }
