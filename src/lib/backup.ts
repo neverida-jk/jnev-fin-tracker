@@ -4,6 +4,16 @@ import db from '../db'
 // that requires migration logic on import (e.g. renaming a table).
 export const BACKUP_SCHEMA_VERSION = 1
 
+// The local-snapshots table (db.ts's automatic, same-device rolling backup
+// history) must never be included in a manual export, and must never be
+// touched by a manual import:
+//   - Including it in an export would let backup files grow unboundedly,
+//     since each snapshot would itself contain a copy of prior snapshots.
+//   - A restored backup legitimately has no entry for this table (it was
+//     never exported), so it must not be flagged as an "unknown table".
+//   - Restoring a backup must never wipe the device's own snapshot history.
+const LOCAL_SNAPSHOTS_TABLE_NAME = 'localSnapshots'
+
 export interface BackupData {
   schemaVersion: number
   exportedAt: string // ISO timestamp
@@ -11,11 +21,14 @@ export interface BackupData {
 }
 
 /**
- * Serializes every Dexie table into one JSON-serializable snapshot.
+ * Serializes every Dexie table (except the local-snapshot history — see
+ * LOCAL_SNAPSHOTS_TABLE_NAME) into one JSON-serializable snapshot.
  */
 export async function exportBackup(): Promise<BackupData> {
   const entries = await Promise.all(
-    db.tables.map(async (table) => [table.name, await table.toArray()] as const),
+    db.tables
+      .filter((table) => table.name !== LOCAL_SNAPSHOTS_TABLE_NAME)
+      .map(async (table) => [table.name, await table.toArray()] as const),
   )
 
   return {
@@ -46,14 +59,15 @@ export async function importBackup(data: object): Promise<void> {
     throw new Error('This file is not a valid finance-tracker backup.')
   }
 
-  const knownTableNames = new Set(db.tables.map((table) => table.name))
+  const restorableTables = db.tables.filter((table) => table.name !== LOCAL_SNAPSHOTS_TABLE_NAME)
+  const knownTableNames = new Set(restorableTables.map((table) => table.name))
   const unknownTables = Object.keys(data.tables).filter((name) => !knownTableNames.has(name))
   if (unknownTables.length > 0) {
     throw new Error(`Backup references unknown table(s): ${unknownTables.join(', ')}`)
   }
 
-  await db.transaction('rw', db.tables, async () => {
-    for (const table of db.tables) {
+  await db.transaction('rw', restorableTables, async () => {
+    for (const table of restorableTables) {
       const rows = data.tables[table.name]
       await table.clear()
       if (rows && rows.length > 0) {

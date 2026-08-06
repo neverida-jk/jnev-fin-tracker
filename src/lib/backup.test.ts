@@ -115,3 +115,48 @@ describe('exportBackup / importBackup round trip', () => {
     expect(accounts.map((a) => a.name)).toEqual(['Untouched'])
   })
 })
+
+describe('exportBackup / importBackup exclude the local-snapshots table', () => {
+  it('exportBackup omits localSnapshots entirely, even when history exists', async () => {
+    await db.localSnapshots.add({
+      id: undefined as unknown as number,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      schemaVersion: 1,
+      tables: { accounts: [] },
+    })
+
+    const backup = await exportBackup()
+
+    expect(Object.keys(backup.tables)).not.toContain('localSnapshots')
+  })
+
+  it('importBackup does not flag a backup file for omitting localSnapshots as an unknown table', async () => {
+    // A real exported backup never has a localSnapshots key (see test
+    // above), so this shape is exactly what importBackup is normally fed.
+    await expect(
+      importBackup({ schemaVersion: 1, exportedAt: new Date().toISOString(), tables: { accounts: [] } }),
+    ).resolves.not.toThrow()
+  })
+
+  it('importBackup leaves existing local snapshot history completely untouched', async () => {
+    const snapshotId = await db.localSnapshots.add({
+      id: undefined as unknown as number,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      schemaVersion: 1,
+      tables: { accounts: [] },
+    })
+
+    await importBackup({
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      tables: { accounts: [] },
+    })
+
+    expect(await db.localSnapshots.get(snapshotId)).toMatchObject({
+      createdAt: '2026-01-01T00:00:00.000Z',
+      schemaVersion: 1,
+      tables: { accounts: [] },
+    })
+    expect(await db.localSnapshots.count()).toBe(1)
+  })
+})

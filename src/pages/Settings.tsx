@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -19,12 +19,14 @@ import {
   ArchiveRestore,
   Sparkles,
   FileText,
+  History,
 } from 'lucide-react'
 import Card from '../components/Card'
 import PickerGrid, { type PickerItem } from '../components/PickerGrid'
 import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import { staggerContainer, fadeUpItem, tapScale } from '../lib/motion'
 import { exportBackup, importBackup } from '../lib/backup'
+import { listLocalSnapshots, restoreLocalSnapshot, MAX_SNAPSHOT_GENERATIONS } from '../lib/localSnapshot'
 import { detectNativeAi, isLocalModelEnabled, setLocalModelEnabled } from '../lib/aiEngine'
 import db, {
   addCategory,
@@ -75,6 +77,7 @@ export default function Settings() {
       className="mx-4 mt-4 space-y-5 pb-6"
     >
       <BackupSection />
+      <AutoSnapshotsSection />
       <CategoriesSection />
       <WordsSection />
       <StorageSection />
@@ -219,6 +222,167 @@ function BackupSection() {
               type="button"
               onClick={cancelImport}
               disabled={importing}
+              className="flex-1 rounded-xl border border-slate-300 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+            >
+              Cancel
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {banner && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className={`mt-3 flex items-center gap-1.5 text-xs ${
+            banner.kind === 'success'
+              ? 'text-green-700 dark:text-green-400'
+              : 'text-red-600 dark:text-red-400'
+          }`}
+          role="status"
+        >
+          {banner.kind === 'success' ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+          {banner.message}
+        </motion.p>
+      )}
+    </Card>
+  )
+}
+
+type LocalSnapshotSummary = { id: number; createdAt: string }
+
+function formatSnapshotTimestamp(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function AutoSnapshotsSection() {
+  const [snapshots, setSnapshots] = useState<LocalSnapshotSummary[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [pendingRestoreId, setPendingRestoreId] = useState<number | null>(null)
+  const [restoring, setRestoring] = useState(false)
+  const [banner, setBanner] = useState<Banner>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const result = await listLocalSnapshots()
+      setSnapshots(result)
+      setLoadError(null)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not load snapshots.')
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  function cancelRestore() {
+    setPendingRestoreId(null)
+  }
+
+  async function confirmRestore() {
+    if (pendingRestoreId === null) return
+    setRestoring(true)
+    setBanner(null)
+    try {
+      await restoreLocalSnapshot(pendingRestoreId)
+      setBanner({ kind: 'success', message: 'Snapshot restored. Your data has been replaced.' })
+    } catch (err) {
+      setBanner({
+        kind: 'error',
+        message: err instanceof Error ? err.message : 'Restore failed. No changes were made.',
+      })
+    } finally {
+      setRestoring(false)
+      setPendingRestoreId(null)
+    }
+  }
+
+  const pendingSnapshot =
+    pendingRestoreId === null ? null : (snapshots ?? []).find((s) => s.id === pendingRestoreId) ?? null
+
+  return (
+    <Card variants={fadeUpItem}>
+      <h2 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-300">Automatic snapshots</h2>
+      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+        In addition to the manual export above, this device automatically keeps up to{' '}
+        {MAX_SNAPSHOT_GENERATIONS} rolling same-device backups — they're a same-device safety net, not
+        a substitute for exporting a backup, which is still the only way to get your data off this
+        device.
+      </p>
+
+      {loadError ? (
+        <p className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400" role="alert">
+          <AlertTriangle size={14} /> {loadError}
+        </p>
+      ) : snapshots === null ? (
+        <p className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <Loader2 size={14} className="animate-spin" /> Loading snapshots...
+        </p>
+      ) : snapshots.length === 0 ? (
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          No automatic snapshots yet. One is taken automatically, at most once per day.
+        </p>
+      ) : (
+        <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+          {snapshots.map((snapshot) => (
+            <li key={snapshot.id} className="flex items-center justify-between gap-2 py-2.5 text-sm">
+              <span className="flex min-w-0 items-center gap-2 text-slate-700 dark:text-slate-300">
+                <History size={14} className="shrink-0 text-slate-400 dark:text-slate-500" />
+                <span className="truncate">{formatSnapshotTimestamp(snapshot.createdAt)}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPendingRestoreId(snapshot.id)}
+                className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 dark:border-slate-700 dark:text-slate-200"
+              >
+                Restore
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {pendingSnapshot && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className="mt-4 overflow-hidden rounded-xl border border-red-300 bg-red-50 p-3 dark:border-red-800/60 dark:bg-red-950/40"
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-600 dark:text-red-400" />
+            <div className="min-w-0 text-sm">
+              <p className="font-medium text-red-800 dark:text-red-300">
+                Replace all current data with the snapshot from{' '}
+                {formatSnapshotTimestamp(pendingSnapshot.createdAt)}?
+              </p>
+              <p className="mt-1 text-xs text-red-700 dark:text-red-400">
+                Every account, transaction, budget, bill, and schedule currently stored on this device
+                will be permanently erased and replaced with the contents of this snapshot. This cannot
+                be undone.
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={confirmRestore}
+              disabled={restoring}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {restoring && <Loader2 size={14} className="animate-spin" />}
+              Yes, replace all data
+            </button>
+            <button
+              type="button"
+              onClick={cancelRestore}
+              disabled={restoring}
               className="flex-1 rounded-xl border border-slate-300 py-2 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
             >
               Cancel

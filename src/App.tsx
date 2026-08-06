@@ -7,6 +7,7 @@ import CommandBar from './components/CommandBar'
 import StatusStrip from './components/StatusStrip'
 import UpdateToast from './components/UpdateToast'
 import { seedIfEmpty } from './db'
+import { shouldTakeSnapshotToday, takeLocalSnapshot } from './lib/localSnapshot'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const AddTransaction = lazy(() => import('./pages/AddTransaction'))
@@ -48,6 +49,17 @@ function App() {
 
   useEffect(() => {
     seedIfEmpty()
+  }, [])
+
+  useEffect(() => {
+    // Best-effort background snapshot: never let this block rendering or
+    // surface an error to the user. Failures (e.g. IndexedDB unavailable)
+    // are logged only.
+    if (shouldTakeSnapshotToday()) {
+      takeLocalSnapshot().catch((error) => {
+        console.error('Background local snapshot failed:', error)
+      })
+    }
   }, [])
 
   return (

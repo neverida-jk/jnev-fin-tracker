@@ -91,6 +91,19 @@ export interface CommandAlias {
   entityId: number
 }
 
+// A same-device, automatic rolling snapshot of the whole database, taken
+// periodically without any user action (unlike the manual Export/Import
+// backup in lib/backup.ts). Deliberately NOT typed against backup.ts's
+// BackupData to avoid a circular import between db.ts and lib/backup.ts —
+// this shape is structurally compatible with BackupData, just declared
+// independently here.
+export interface LocalSnapshot {
+  id: number
+  createdAt: string // ISO timestamp
+  schemaVersion: number
+  tables: Record<string, unknown[]>
+}
+
 const db = new Dexie('finance-tracker') as Dexie & {
   accounts: EntityTable<Account, 'id'>
   categories: EntityTable<Category, 'id'>
@@ -101,6 +114,7 @@ const db = new Dexie('finance-tracker') as Dexie & {
   payoutDates: EntityTable<PayoutDate, 'id'>
   transfers: EntityTable<Transfer, 'id'>
   commandAliases: EntityTable<CommandAlias, 'id'>
+  localSnapshots: EntityTable<LocalSnapshot, 'id'>
 }
 
 db.version(1).stores({
@@ -155,6 +169,19 @@ db.version(5).stores({
   payoutDates: '++id, scheduleId, date',
   transfers: '++id, fromAccountId, toAccountId, date',
   commandAliases: '++id, phrase, entityType',
+})
+
+db.version(6).stores({
+  accounts: '++id, name, type',
+  categories: '++id, name, kind, archived',
+  transactions: '++id, accountId, categoryId, date, payoutDateId',
+  budgets: '++id, categoryId',
+  recurringBills: '++id, dueDay, active',
+  payoutSchedules: '++id, active',
+  payoutDates: '++id, scheduleId, date',
+  transfers: '++id, fromAccountId, toAccountId, date',
+  commandAliases: '++id, phrase, entityType',
+  localSnapshots: '++id, createdAt',
 })
 
 export default db
