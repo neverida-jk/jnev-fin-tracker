@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Plus, Trash2, Check, ChevronLeft } from 'lucide-react'
+import { Plus, Trash2, Check, ChevronLeft, AlertTriangle } from 'lucide-react'
 import db from '../db'
 import { formatMoney } from '../lib/format'
 import { currentMonthKey } from '../lib/dates'
@@ -313,7 +313,7 @@ function RecurringBills() {
         className="grid grid-flow-row-dense grid-cols-2 gap-3"
       >
         <AnimatePresence initial={false}>
-          {withStatus.map(({ bill, dueDate, paidThisMonth }) => (
+          {withStatus.map(({ bill, dueDate, paidThisMonth, overdue }) => (
             <Card
               key={bill.id}
               layout
@@ -336,6 +336,11 @@ function RecurringBills() {
                 {formatMoney(bill.amount)} · due{' '}
                 {dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
               </p>
+              {overdue && (
+                <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
+                  <AlertTriangle size={12} /> Overdue
+                </p>
+              )}
               <p className="truncate text-xs text-slate-400 dark:text-slate-500">
                 {accountsById.get(bill.accountId)?.name} · {categoriesById.get(bill.categoryId)?.name}
               </p>

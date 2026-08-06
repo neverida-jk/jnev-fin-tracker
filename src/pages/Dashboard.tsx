@@ -249,15 +249,20 @@ export default function Dashboard() {
           ) : (
             <ul className="space-y-2">
               {(billsSpan === 'col-span-2' ? upcomingBills : nextBill ? [nextBill] : []).map(
-                ({ bill, dueDate }) => (
+                ({ bill, dueDate, overdue }) => (
                   <li
                     key={bill.id}
                     className="min-w-0 rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60"
                   >
                     <p className="truncate min-w-0 text-slate-700 dark:text-slate-300">{bill.name}</p>
-                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    <p
+                      className={`mt-0.5 text-xs ${
+                        overdue ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'
+                      }`}
+                    >
                       {formatMoney(bill.amount)} · due{' '}
                       {dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      {overdue && ' · Overdue'}
                     </p>
                   </li>
                 ),

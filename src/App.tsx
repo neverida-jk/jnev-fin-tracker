@@ -5,6 +5,7 @@ import Header from './components/Header'
 import PageTransition from './components/PageTransition'
 import CommandBar from './components/CommandBar'
 import StatusStrip from './components/StatusStrip'
+import UpdateToast from './components/UpdateToast'
 import { seedIfEmpty } from './db'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -52,6 +53,7 @@ function App() {
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Header title={titleFor(location.pathname)} />
+      <UpdateToast />
       <main className="flex-1 overflow-y-auto pb-4">
         <Suspense fallback={<RouteFallback />}>
           <AnimatePresence mode="wait" initial={false}>

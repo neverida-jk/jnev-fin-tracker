@@ -75,8 +75,10 @@ export function buildFinancialContext(
 
 /** The always-available, fully offline answer — a deterministic template
  * filled in with real numbers from `context`. Never invents a figure. Used
- * directly when offline / no AI key configured, and as the guaranteed
- * fallback if the optional AI enhancement fails or times out. */
+ * directly when no on-device AI is available, and as the guaranteed
+ * fallback text handed to aiEngine.ts's generateNarrative(), which only
+ * ever rephrases this text (native browser AI, then an opt-in local model)
+ * and never alters the underlying numbers. */
 export function composeLocalAnswer(context: FinancialContext, categoryName?: string): string {
   if (categoryName) {
     const cat = context.categories.find((c) => c.name === categoryName)
