@@ -35,7 +35,7 @@ describe('buildFinancialContext', () => {
       tx({ id: 2, categoryId: 2, amount: 1500, date: '2026-07-10' }), // Groceries expense
       tx({ id: 3, categoryId: 3, amount: 8000, date: '2026-06-01' }), // Rent, previous month
     ]
-    const budgets: Budget[] = [{ id: 1, categoryId: 2, monthlyLimit: 5000 }]
+    const budgets: Budget[] = [{ id: 1, categoryId: 2, period: 'monthly', limit: 5000 }]
 
     const ctx = buildFinancialContext(accounts, categories, transactions, [], budgets, TODAY)
 
@@ -44,7 +44,7 @@ describe('buildFinancialContext', () => {
     expect(ctx.expenseThisMonth).toBe(1500)
     const groceries = ctx.categories.find((c) => c.name === 'Groceries')
     expect(groceries?.spentThisMonth).toBe(1500)
-    expect(groceries?.budget).toBe(5000)
+    expect(groceries?.budget).toEqual({ limit: 5000, period: 'monthly' })
     const rent = ctx.categories.find((c) => c.name === 'Rent')
     expect(rent?.spentThisMonth).toBe(0) // June transaction isn't "this month"
     expect(rent?.avgMonthlyHistorical).toBe(8000)
@@ -61,6 +61,7 @@ function makeContext(overrides: Partial<FinancialContext> = {}): FinancialContex
   return {
     monthKey: '2026-07',
     daysLeftInMonth: 17,
+    daysLeftInWeek: 4,
     netWorth: 1000,
     accounts: [{ name: 'GCash', balance: 1000 }],
     categories: [],
@@ -73,7 +74,7 @@ function makeContext(overrides: Partial<FinancialContext> = {}): FinancialContex
 describe('composeLocalAnswer', () => {
   it('reports remaining budget and a per-day allowance when under budget', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Groceries', kind: 'expense', budget: 5000, spentThisMonth: 2000, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Groceries', kind: 'expense', budget: { limit: 5000, period: 'monthly' }, spentThisMonth: 2000, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     const answer = composeLocalAnswer(ctx, 'Groceries')
     expect(answer).toContain(formatMoney(3000)) // remaining
@@ -83,7 +84,7 @@ describe('composeLocalAnswer', () => {
 
   it('reports being over budget', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Groceries', kind: 'expense', budget: 2000, spentThisMonth: 2500, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Groceries', kind: 'expense', budget: { limit: 2000, period: 'monthly' }, spentThisMonth: 2500, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     const answer = composeLocalAnswer(ctx, 'Groceries')
     expect(answer).toBe(`You're ${formatMoney(500)} over your Groceries budget this month (spent ${formatMoney(2500)} of ${formatMoney(2000)}).`)
@@ -91,7 +92,7 @@ describe('composeLocalAnswer', () => {
 
   it('falls back to historical average when no budget is set', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Dining', kind: 'expense', spentThisMonth: 300, avgMonthlyHistorical: 1200 }],
+      categories: [{ name: 'Dining', kind: 'expense', spentThisMonth: 300, spentThisWeek: 0, avgMonthlyHistorical: 1200 }],
     })
     const answer = composeLocalAnswer(ctx, 'Dining')
     expect(answer).toContain(formatMoney(1200))
@@ -100,7 +101,7 @@ describe('composeLocalAnswer', () => {
 
   it('handles no budget and no history but some spend this month', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Dining', kind: 'expense', spentThisMonth: 300, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Dining', kind: 'expense', spentThisMonth: 300, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     expect(composeLocalAnswer(ctx, 'Dining')).toBe(
       `No budget set for Dining yet. You've spent ${formatMoney(300)} so far this month — set a budget in the Budgets tab to get a real answer next time.`,
@@ -109,7 +110,7 @@ describe('composeLocalAnswer', () => {
 
   it('handles no budget, no history, and no spend', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Dining', kind: 'expense', spentThisMonth: 0, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Dining', kind: 'expense', spentThisMonth: 0, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     expect(composeLocalAnswer(ctx, 'Dining')).toBe(
       'No budget set for Dining, and no spending logged yet this month — log a few transactions and ask again.',
@@ -124,9 +125,9 @@ describe('composeLocalAnswer', () => {
   it('suggests a budget breakdown from historical spend when no category is named', () => {
     const ctx = makeContext({
       categories: [
-        { name: 'Rent', kind: 'expense', spentThisMonth: 0, avgMonthlyHistorical: 8000 },
-        { name: 'Dining', kind: 'expense', spentThisMonth: 0, avgMonthlyHistorical: 2000 },
-        { name: 'Salary', kind: 'income', spentThisMonth: 0, avgMonthlyHistorical: 20000 }, // excluded, not expense
+        { name: 'Rent', kind: 'expense', spentThisMonth: 0, spentThisWeek: 0, avgMonthlyHistorical: 8000 },
+        { name: 'Dining', kind: 'expense', spentThisMonth: 0, spentThisWeek: 0, avgMonthlyHistorical: 2000 },
+        { name: 'Salary', kind: 'income', spentThisMonth: 0, spentThisWeek: 0, avgMonthlyHistorical: 20000 }, // excluded, not expense
       ],
     })
     const answer = composeLocalAnswer(ctx)
@@ -136,7 +137,7 @@ describe('composeLocalAnswer', () => {
   })
 
   it('says there is not enough history when nothing has been spent yet', () => {
-    const ctx = makeContext({ categories: [{ name: 'Rent', kind: 'expense', spentThisMonth: 0, avgMonthlyHistorical: 0 }] })
+    const ctx = makeContext({ categories: [{ name: 'Rent', kind: 'expense', spentThisMonth: 0, spentThisWeek: 0, avgMonthlyHistorical: 0 }] })
     expect(composeLocalAnswer(ctx)).toBe('Not enough transaction history yet to suggest a budget — log expenses for a few weeks and ask again.')
   })
 })
@@ -152,8 +153,8 @@ describe('composeBudgetHealthCheck', () => {
       incomeThisMonth: 10000,
       expenseThisMonth: 8000,
       categories: [
-        { name: 'Rent', kind: 'expense', spentThisMonth: 5000, avgMonthlyHistorical: 0 }, // needs
-        { name: 'Dining', kind: 'expense', spentThisMonth: 3000, avgMonthlyHistorical: 0 }, // wants
+        { name: 'Rent', kind: 'expense', spentThisMonth: 5000, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // needs
+        { name: 'Dining', kind: 'expense', spentThisMonth: 3000, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // wants
       ],
     })
     // needs 50%, wants 30%, saved (10000-8000)/10000 = 20% — exactly on target
@@ -165,8 +166,8 @@ describe('composeBudgetHealthCheck', () => {
       incomeThisMonth: 10000,
       expenseThisMonth: 9500,
       categories: [
-        { name: 'Rent', kind: 'expense', spentThisMonth: 7000, avgMonthlyHistorical: 0 }, // needs 70% > 55%
-        { name: 'Dining', kind: 'expense', spentThisMonth: 2500, avgMonthlyHistorical: 0 }, // wants 25%
+        { name: 'Rent', kind: 'expense', spentThisMonth: 7000, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // needs 70% > 55%
+        { name: 'Dining', kind: 'expense', spentThisMonth: 2500, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // wants 25%
       ],
     })
     const answer = composeBudgetHealthCheck(ctx)
@@ -192,7 +193,7 @@ describe('composePurchaseAdvice', () => {
 
   it('warns when a purchase would exceed the remaining category budget', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Dining', kind: 'expense', budget: 1000, spentThisMonth: 800, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Dining', kind: 'expense', budget: { limit: 1000, period: 'monthly' }, spentThisMonth: 800, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     const answer = composePurchaseAdvice(ctx, 300, 'Dining')
     expect(answer).toContain(`${formatMoney(100)} over what's left in Dining`)
@@ -200,7 +201,7 @@ describe('composePurchaseAdvice', () => {
 
   it('cautions when a purchase eats more than half of what remains', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Dining', kind: 'expense', budget: 1000, spentThisMonth: 0, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Dining', kind: 'expense', budget: { limit: 1000, period: 'monthly' }, spentThisMonth: 0, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     // remaining = 1000, spending 600 > 50% of 1000
     const answer = composePurchaseAdvice(ctx, 600, 'Dining')
@@ -209,7 +210,7 @@ describe('composePurchaseAdvice', () => {
 
   it('says a purchase fits comfortably within the remaining budget', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Dining', kind: 'expense', budget: 1000, spentThisMonth: 0, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Dining', kind: 'expense', budget: { limit: 1000, period: 'monthly' }, spentThisMonth: 0, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     const answer = composePurchaseAdvice(ctx, 100, 'Dining')
     expect(answer).toContain('fits comfortably')
@@ -231,21 +232,21 @@ describe('composePurchaseAdvice', () => {
 describe('composeBudgetPaceHighlight', () => {
   it('returns null when no expense category has crossed the 75% threshold', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Dining', kind: 'expense', budget: 3000, spentThisMonth: 2000, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Dining', kind: 'expense', budget: { limit: 3000, period: 'monthly' }, spentThisMonth: 2000, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     expect(composeBudgetPaceHighlight(ctx)).toBeNull()
   })
 
   it('ignores expense categories with no budget set', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Dining', kind: 'expense', spentThisMonth: 5000, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Dining', kind: 'expense', spentThisMonth: 5000, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     expect(composeBudgetPaceHighlight(ctx)).toBeNull()
   })
 
   it('ignores income categories even if spend exceeds a "budget" value', () => {
     const ctx = makeContext({
-      categories: [{ name: 'Salary', kind: 'income', budget: 1000, spentThisMonth: 1000, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Salary', kind: 'income', budget: { limit: 1000, period: 'monthly' }, spentThisMonth: 1000, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     expect(composeBudgetPaceHighlight(ctx)).toBeNull()
   })
@@ -254,8 +255,8 @@ describe('composeBudgetPaceHighlight', () => {
     const ctx = makeContext({
       daysLeftInMonth: 9,
       categories: [
-        { name: 'Dining', kind: 'expense', budget: 3000, spentThisMonth: 2460, avgMonthlyHistorical: 0 }, // 82%
-        { name: 'Transport', kind: 'expense', budget: 2000, spentThisMonth: 1000, avgMonthlyHistorical: 0 }, // 50%
+        { name: 'Dining', kind: 'expense', budget: { limit: 3000, period: 'monthly' }, spentThisMonth: 2460, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // 82%
+        { name: 'Transport', kind: 'expense', budget: { limit: 2000, period: 'monthly' }, spentThisMonth: 1000, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // 50%
       ],
     })
     expect(composeBudgetPaceHighlight(ctx)).toBe(
@@ -266,7 +267,7 @@ describe('composeBudgetPaceHighlight', () => {
   it('reports being over budget once spend has passed 100%, using the singular "day" at 1 day left', () => {
     const ctx = makeContext({
       daysLeftInMonth: 1,
-      categories: [{ name: 'Rent', kind: 'expense', budget: 8000, spentThisMonth: 9000, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Rent', kind: 'expense', budget: { limit: 8000, period: 'monthly' }, spentThisMonth: 9000, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     expect(composeBudgetPaceHighlight(ctx)).toBe(
       `Rent is already over its ${formatMoney(8000)} budget this month, with 1 day left.`,
@@ -327,7 +328,7 @@ describe('composePersonalizedHighlight', () => {
   it('prefers the budget pace highlight over the spending pace highlight when both are available', () => {
     const ctx = makeContext({
       daysLeftInMonth: 5,
-      categories: [{ name: 'Dining', kind: 'expense', budget: 1000, spentThisMonth: 900, avgMonthlyHistorical: 0 }],
+      categories: [{ name: 'Dining', kind: 'expense', budget: { limit: 1000, period: 'monthly' }, spentThisMonth: 900, spentThisWeek: 0, avgMonthlyHistorical: 0 }],
     })
     const expectedByNow = 10000 * (10 / 31)
     const series = paceSeries(10000, expectedByNow * 1.5) // would also trigger the spending-pace highlight

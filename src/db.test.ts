@@ -163,7 +163,8 @@ describe('deleteCategory', () => {
     await db.budgets.add({
       id: undefined as unknown as number,
       categoryId,
-      monthlyLimit: 3000,
+      period: 'monthly',
+      limit: 3000,
     })
 
     await expect(deleteCategory(categoryId)).rejects.toThrow(

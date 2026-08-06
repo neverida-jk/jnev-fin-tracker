@@ -1,7 +1,13 @@
 import type { Account, Budget, Category, Transaction, Transfer } from '../db'
-import { buildFinancialContext, composeBudgetHealthCheck, composeBudgetPaceHighlight, composeSpendingPaceHighlight } from './financialContext'
+import {
+  buildFinancialContext,
+  composeBudgetHealthCheck,
+  composeBudgetPaceHighlight,
+  composeSpendingPaceHighlight,
+  composeWeeklySpendingPaceHighlight,
+} from './financialContext'
 import { detectUnusualSpend } from './anomalyDetection'
-import { buildMonthlySeries } from './finance'
+import { buildMonthlySeries, buildWeeklySeries } from './finance'
 import { currentMonthKey } from './dates'
 import { generateNarrative, type AiTier } from './aiEngine'
 
@@ -83,5 +89,67 @@ export async function generateMonthInReview(
 ): Promise<{ text: string; tier: AiTier }> {
   const fallbackText = buildMonthInReviewFallback(input, today)
   const prompt = buildMonthInReviewPrompt(fallbackText, currentMonthKey(today))
+  return generateNarrative(prompt, fallbackText)
+}
+
+// How many weeks of history to pull for the week-over-week pace comparison.
+const WEEKLY_SERIES_WEEKS_BACK = 8
+
+// Shown when there is genuinely nothing to flag yet this week — unlike
+// buildMonthInReviewFallback, composeBudgetHealthCheck (the one building
+// block guaranteed to always return a sentence) is deliberately not reused
+// here, since a needs/wants/savings-vs-income check is a monthly-budgeting
+// convention that does not translate cleanly to a single week. Anomaly
+// detection is also month-scoped (it compares against monthly historical
+// averages) but is still meaningful to surface regardless of which review
+// period the user is looking at, so it's included in both.
+const NOTHING_TO_FLAG_THIS_WEEK = 'Nothing notable to flag this week yet — keep logging transactions and check back.'
+
+/** Week-mode analog of buildMonthInReviewFallback — budget pace (already
+ * period-agnostic per-budget, see financialContext.ts's budgetProgress) plus
+ * the week-over-week spending pace and any anomalies. Always returns a
+ * non-empty string, same guarantee as the month version, just via an
+ * explicit fallback sentence instead of composeBudgetHealthCheck. */
+export function buildWeekInReviewFallback(input: MonthInReviewInput, today: Date = new Date()): string {
+  const { transactions, categories, budgets, accounts, transfers } = input
+  const categoriesById = new Map(categories.map((c) => [c.id, c]))
+
+  const context = buildFinancialContext(accounts, categories, transactions, transfers, budgets, today)
+  const series = buildWeeklySeries(accounts, transactions, categoriesById, WEEKLY_SERIES_WEEKS_BACK, today)
+
+  const sentences: string[] = []
+
+  const budgetPace = composeBudgetPaceHighlight(context)
+  if (budgetPace) sentences.push(budgetPace)
+
+  const spendingPace = composeWeeklySpendingPaceHighlight(series, today)
+  if (spendingPace) sentences.push(spendingPace)
+
+  for (const unusual of detectUnusualSpend(transactions, categories, today)) {
+    sentences.push(unusual.message)
+  }
+
+  return sentences.length > 0 ? sentences.join(' ') : NOTHING_TO_FLAG_THIS_WEEK
+}
+
+function buildWeekInReviewPrompt(fallbackText: string): string {
+  return [
+    'You are a friendly personal finance assistant writing a short "week in review" recap.',
+    'Rewrite the facts below as a warm, natural 2-4 sentence recap.',
+    'Only use the numbers and facts already given — do not invent any new figures, categories, or events, and do not add advice beyond what the facts already imply.',
+    '',
+    'Facts:',
+    fallbackText,
+  ].join('\n')
+}
+
+/** Week-mode analog of generateMonthInReview — same native/local-model/
+ * template tier chain, just built from buildWeekInReviewFallback. */
+export async function generateWeekInReview(
+  input: MonthInReviewInput,
+  today: Date = new Date(),
+): Promise<{ text: string; tier: AiTier }> {
+  const fallbackText = buildWeekInReviewFallback(input, today)
+  const prompt = buildWeekInReviewPrompt(fallbackText)
   return generateNarrative(prompt, fallbackText)
 }

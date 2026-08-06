@@ -136,20 +136,24 @@ export async function executeCommand(cmd: ParsedCommand): Promise<ExecutionResul
       }
       const existing = await db.budgets.where('categoryId').equals(cmd.categoryId).first()
       if (existing) {
-        const previousLimit = existing.monthlyLimit
-        await db.budgets.update(existing.id, { monthlyLimit: cmd.amount })
+        const previousLimit = existing.limit
+        await db.budgets.update(existing.id, { limit: cmd.amount })
         return {
           ok: true,
           message: cmd.summary,
           undo: async () => {
-            await db.budgets.update(existing.id, { monthlyLimit: previousLimit })
+            await db.budgets.update(existing.id, { limit: previousLimit })
           },
         }
       }
+      // Command-bar-created budgets default to monthly — there's no weekly
+      // phrasing wired into the parser yet; weekly budgets are created via
+      // the Budgets page's period toggle.
       const id = await db.budgets.add({
         id: undefined as unknown as number,
         categoryId: cmd.categoryId,
-        monthlyLimit: cmd.amount,
+        period: 'monthly',
+        limit: cmd.amount,
       })
       return {
         ok: true,

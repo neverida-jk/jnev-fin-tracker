@@ -31,10 +31,13 @@ export interface Transaction {
   createdAt: string
 }
 
+export type BudgetPeriod = 'weekly' | 'monthly'
+
 export interface Budget {
   id: number
   categoryId: number
-  monthlyLimit: number
+  period: BudgetPeriod
+  limit: number
 }
 
 export interface RecurringBill {
@@ -183,6 +186,34 @@ db.version(6).stores({
   commandAliases: '++id, phrase, entityType',
   localSnapshots: '++id, createdAt',
 })
+
+// Budgets gain a period ('weekly' | 'monthly') alongside the renamed
+// monthlyLimit -> limit — existing rows are monthly by definition (weekly
+// budgets didn't exist before this version), so the upgrade just carries
+// their old limit forward under the new field name.
+db.version(7)
+  .stores({
+    accounts: '++id, name, type',
+    categories: '++id, name, kind, archived',
+    transactions: '++id, accountId, categoryId, date, payoutDateId',
+    budgets: '++id, categoryId, period',
+    recurringBills: '++id, dueDay, active',
+    payoutSchedules: '++id, active',
+    payoutDates: '++id, scheduleId, date',
+    transfers: '++id, fromAccountId, toAccountId, date',
+    commandAliases: '++id, phrase, entityType',
+    localSnapshots: '++id, createdAt',
+  })
+  .upgrade(async (tx) => {
+    await tx
+      .table('budgets')
+      .toCollection()
+      .modify((budget) => {
+        budget.period = 'monthly'
+        budget.limit = budget.monthlyLimit
+        delete budget.monthlyLimit
+      })
+  })
 
 export default db
 

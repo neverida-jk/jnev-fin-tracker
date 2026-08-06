@@ -697,7 +697,7 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
       categoryPhrase: cleaned,
       date,
       raw,
-      summary: `Clear budget: ${category.name} (₱${budget.monthlyLimit.toLocaleString()}/mo)?`,
+      summary: `Clear budget: ${category.name} (₱${budget.limit.toLocaleString()}/${budget.period === 'weekly' ? 'wk' : 'mo'})?`,
     }
   }
 

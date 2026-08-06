@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Plus, Trash2, ChevronLeft, Check } from 'lucide-react'
-import db, { type Category, type Transaction } from '../db'
-import { spentByCategoryThisMonth } from '../lib/finance'
+import db, { type BudgetPeriod, type Category, type Transaction } from '../db'
+import { spentByCategoryThisMonth, spentByCategoryThisWeek } from '../lib/finance'
 import { formatMoney } from '../lib/format'
 import { recommendBudget } from '../lib/budgetRecommendation'
 import type { AiTier } from '../lib/aiEngine'
@@ -29,9 +29,9 @@ export default function Budgets() {
   )
 
   async function updateLimit(id: number, value: string) {
-    const monthlyLimit = Number(value)
-    if (Number.isNaN(monthlyLimit)) return
-    await db.budgets.update(id, { monthlyLimit })
+    const limit = Number(value)
+    if (Number.isNaN(limit)) return
+    await db.budgets.update(id, { limit })
   }
 
   async function removeBudget(id: number) {
@@ -48,9 +48,12 @@ export default function Budgets() {
       <AnimatePresence initial={false}>
         {(budgets ?? []).map((budget) => {
           const category = categoriesById.get(budget.categoryId)
-          const spent = spentByCategoryThisMonth(transactions ?? [], budget.categoryId)
-          const pct = budget.monthlyLimit > 0 ? Math.min(100, (spent / budget.monthlyLimit) * 100) : 0
-          const over = spent > budget.monthlyLimit
+          const spent =
+            budget.period === 'weekly'
+              ? spentByCategoryThisWeek(transactions ?? [], budget.categoryId)
+              : spentByCategoryThisMonth(transactions ?? [], budget.categoryId)
+          const pct = budget.limit > 0 ? Math.min(100, (spent / budget.limit) * 100) : 0
+          const over = spent > budget.limit
           return (
             <Card
               key={budget.id}
@@ -87,12 +90,12 @@ export default function Budgets() {
               <p
                 className={`mt-2 text-xs ${over ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}
               >
-                <span className="tabular-money">{formatMoney(spent)}</span> spent
+                <span className="tabular-money">{formatMoney(spent)}</span> spent this {budget.period === 'weekly' ? 'week' : 'month'}
               </p>
               <input
                 type="number"
                 step="0.01"
-                defaultValue={budget.monthlyLimit}
+                defaultValue={budget.limit}
                 onBlur={(e) => updateLimit(budget.id, e.target.value)}
                 className="mt-1 w-full rounded-xl border border-slate-300 px-2 py-1 text-sm tabular-money transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
               />
@@ -119,6 +122,7 @@ function AddBudgetFlow({
   const [step, setStep] = useState(0)
   const [direction, setDirection] = useState(1)
   const [categoryId, setCategoryId] = useState<number | ''>('')
+  const [period, setPeriod] = useState<BudgetPeriod>('monthly')
   const [limit, setLimit] = useState('')
   const [saved, setSaved] = useState(false)
   const [recommendation, setRecommendation] = useState<{
@@ -165,6 +169,7 @@ function AddBudgetFlow({
     setStep(0)
     setDirection(1)
     setCategoryId('')
+    setPeriod('monthly')
     setLimit('')
     setSaved(false)
     setRecommendation(null)
@@ -187,7 +192,8 @@ function AddBudgetFlow({
     await db.budgets.add({
       id: undefined as unknown as number,
       categoryId,
-      monthlyLimit: numericLimit,
+      period,
+      limit: numericLimit,
     })
     setSaved(true)
     setTimeout(() => setOpen(false), 500)
@@ -220,7 +226,7 @@ function AddBudgetFlow({
                 Cancel
               </button>
             </div>
-            <StepDots total={2} current={step} />
+            <StepDots total={3} current={step} />
 
             <AnimatePresence mode="wait" custom={direction}>
               {step === 0 && (
@@ -237,11 +243,45 @@ function AddBudgetFlow({
               )}
 
               {step === 1 && (
+                <FlowStep key="period" direction={direction}>
+                  <div className="space-y-3">
+                    <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                      Budget by week or by month?
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Weekly budgets run Monday to Sunday — often easier to stay on top of for day-to-day needs than
+                      waiting for month-end.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(['weekly', 'monthly'] as BudgetPeriod[]).map((p) => (
+                        <motion.button
+                          key={p}
+                          {...tapScale}
+                          type="button"
+                          onClick={() => {
+                            setPeriod(p)
+                            goNext()
+                          }}
+                          className={`rounded-xl border py-3 text-sm font-medium capitalize transition-colors ${
+                            period === p
+                              ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300'
+                              : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {p}
+                        </motion.button>
+                      ))}
+                    </div>
+                  </div>
+                </FlowStep>
+              )}
+
+              {step === 2 && (
                 <FlowStep key="limit" direction={direction}>
                   <div className="space-y-3">
                     <p className="flex items-center gap-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
                       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: category?.color }} />
-                      {category?.name}
+                      {category?.name} · <span className="capitalize">{period}</span>
                     </p>
 
                     <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-800/60">
@@ -265,7 +305,12 @@ function AddBudgetFlow({
                               </span>
                             )}
                           </div>
-                          {recommendation.suggestedAmount !== null && (
+                          {/* The recommendation engine only ever suggests a monthly
+                              figure (see budgetRecommendation.ts) — only offer the
+                              one-tap fill when the chosen period actually matches,
+                              so a monthly-scaled number never lands in a weekly
+                              limit field unlabeled. */}
+                          {recommendation.suggestedAmount !== null && period === 'monthly' && (
                             <motion.button
                               {...tapScale}
                               type="button"
@@ -287,7 +332,7 @@ function AddBudgetFlow({
                       autoFocus
                       value={limit}
                       onChange={(e) => setLimit(e.target.value)}
-                      placeholder="Monthly limit"
+                      placeholder={period === 'weekly' ? 'Weekly limit' : 'Monthly limit'}
                       className="w-full rounded-xl border border-slate-300 px-3 py-3 text-2xl tabular-money transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
                     />
                     <motion.button

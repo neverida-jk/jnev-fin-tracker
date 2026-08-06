@@ -24,7 +24,7 @@ function tx(overrides: Partial<Transaction>): Transaction {
  * compare against — every composeXHighlight building block should have
  * something to say. */
 function richInput(): MonthInReviewInput {
-  const budgets: Budget[] = [{ id: 1, categoryId: 2, monthlyLimit: 5000 }]
+  const budgets: Budget[] = [{ id: 1, categoryId: 2, period: 'monthly', limit: 5000 }]
   const transactions: Transaction[] = [
     tx({ id: 1, amount: 2000, date: '2026-05-10' }), // Groceries, May
     tx({ id: 2, amount: 2000, date: '2026-06-10' }), // Groceries, June

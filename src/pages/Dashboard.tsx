@@ -1,6 +1,6 @@
-import { useState, type CSSProperties } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   PieChart,
   Pie,
@@ -24,7 +24,6 @@ import {
   AlertTriangle,
   Sparkles,
   Newspaper,
-  ChevronDown,
 } from 'lucide-react'
 import db from '../db'
 import PendingPayoutBanner from '../components/PendingPayoutBanner'
@@ -33,6 +32,7 @@ import Tile from '../components/Tile'
 import Card from '../components/Card'
 import { formatMoney, formatMonthLabel, formatWeekLabel } from '../lib/format'
 import {
+  accountBalance,
   netWorth,
   spentByCategoryThisMonth,
   spentByCategoryThisWeek,
@@ -42,8 +42,14 @@ import {
 import { buildFinancialContext, composePersonalizedHighlight } from '../lib/financialContext'
 import { detectUnusualSpend } from '../lib/anomalyDetection'
 import { getUpcomingUnpaidBills } from '../lib/bills'
-import { staggerContainer, fadeUpItem, collapseItem } from '../lib/motion'
-import { generateMonthInReview, type MonthInReviewInput } from '../lib/monthInReview'
+import { staggerContainer, fadeUpItem } from '../lib/motion'
+import {
+  buildMonthInReviewFallback,
+  buildWeekInReviewFallback,
+  generateMonthInReview,
+  generateWeekInReview,
+  type MonthInReviewInput,
+} from '../lib/monthInReview'
 import type { AiTier } from '../lib/aiEngine'
 
 type ChartPeriod = 'week' | 'month'
@@ -77,6 +83,15 @@ export default function Dashboard() {
   const categoriesById = new Map((categories ?? []).map((c) => [c.id, c]))
 
   const worth = loading ? 0 : netWorth(accounts, transactions, transfers ?? [], categoriesById)
+  // The Accounts tile used to just repeat the net-worth total, which is
+  // redundant with the hero tile above it — surfacing the lowest-balance
+  // account instead gives genuinely new information (which account to keep
+  // an eye on), the same way a neobank app would.
+  const accountBalances = loading
+    ? []
+    : accounts.map((a) => ({ name: a.name, balance: accountBalance(a, transactions, transfers ?? [], categoriesById) }))
+  const lowestBalanceAccount =
+    accountBalances.length > 0 ? accountBalances.reduce((min, a) => (a.balance < min.balance ? a : min)) : null
   const upcomingBills = loading ? [] : getUpcomingUnpaidBills(bills).slice(0, 3)
   const topBudgets = (budgets ?? []).slice(0, 2)
   const nextBill = upcomingBills[0]
@@ -134,7 +149,7 @@ export default function Dashboard() {
           Expense: p.expense,
         }))
 
-  const monthInReviewInput: MonthInReviewInput = {
+  const financeHealthInput: MonthInReviewInput = {
     transactions: transactions ?? [],
     categories: categories ?? [],
     budgets: budgets ?? [],
@@ -183,11 +198,22 @@ export default function Dashboard() {
           <Wallet size={20} className="text-indigo-500" />
           <div className="mt-6">
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {loading ? '—' : `${accounts.length} account${accounts.length === 1 ? '' : 's'}`}
+              {loading
+                ? '—'
+                : `${accounts.length} account${accounts.length === 1 ? '' : 's'} · lowest balance`}
             </p>
-            <p className="tabular-money text-lg font-semibold text-slate-800 dark:text-slate-200">
-              {loading ? '—' : formatMoney(worth)}
-            </p>
+            {lowestBalanceAccount ? (
+              <>
+                <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-300">
+                  {lowestBalanceAccount.name}
+                </p>
+                <p className="tabular-money text-lg font-semibold text-slate-800 dark:text-slate-200">
+                  {formatMoney(lowestBalanceAccount.balance)}
+                </p>
+              </>
+            ) : (
+              <p className="tabular-money text-lg font-semibold text-slate-800 dark:text-slate-200">—</p>
+            )}
           </div>
         </Tile>
 
@@ -197,15 +223,17 @@ export default function Dashboard() {
             <p className="text-xs font-semibold uppercase tracking-wide">Budgets</p>
           </div>
           {topBudgets.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">Tap to set a monthly budget.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Tap to set a weekly or monthly budget.</p>
           ) : (
             <div className="space-y-3">
               {topBudgets.map((budget) => {
                 const category = categoriesById.get(budget.categoryId)
-                const spent = spentByCategoryThisMonth(transactions ?? [], budget.categoryId)
-                const pct =
-                  budget.monthlyLimit > 0 ? Math.min(100, (spent / budget.monthlyLimit) * 100) : 0
-                const over = spent > budget.monthlyLimit
+                const spent =
+                  budget.period === 'weekly'
+                    ? spentByCategoryThisWeek(transactions ?? [], budget.categoryId)
+                    : spentByCategoryThisMonth(transactions ?? [], budget.categoryId)
+                const pct = budget.limit > 0 ? Math.min(100, (spent / budget.limit) * 100) : 0
+                const over = spent > budget.limit
                 return (
                   <div key={budget.id}>
                     <div className="flex justify-between text-xs">
@@ -215,13 +243,16 @@ export default function Dashboard() {
                           style={{ backgroundColor: category?.color }}
                         />
                         {category?.name ?? 'Unknown'}
+                        <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500">
+                          /{budget.period === 'weekly' ? 'wk' : 'mo'}
+                        </span>
                       </span>
                       <span
                         className={
                           over ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'
                         }
                       >
-                        {formatMoney(spent)} / {formatMoney(budget.monthlyLimit)}
+                        {formatMoney(spent)} / {formatMoney(budget.limit)}
                       </span>
                     </div>
                     <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-700/60">
@@ -271,7 +302,7 @@ export default function Dashboard() {
           )}
         </Tile>
 
-        <MonthInReviewTile input={monthInReviewInput} />
+        <FinanceHealthTile input={financeHealthInput} />
       </motion.div>
 
       <motion.div
@@ -490,119 +521,60 @@ function PeriodToggle({
   )
 }
 
-/** Expand-in-place recap tile, mirroring the account-history expand pattern
- * in Accounts.tsx (clickable header with a rotating chevron, AnimatePresence
- * + collapseItem for the panel). Collapsed by default with a short teaser;
- * on first expand it calls generateMonthInReview() (native AI / opt-in local
- * model / deterministic template, in that order) and caches the result so
- * re-collapsing/expanding doesn't refetch. */
-function MonthInReviewTile({ input }: { input: MonthInReviewInput }) {
-  const [expanded, setExpanded] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{ text: string; tier: AiTier } | null>(null)
-  const [error, setError] = useState(false)
+/** Always-visible finance recap — no tap required. The deterministic
+ * fallback (buildMonthInReviewFallback/buildWeekInReviewFallback) is
+ * synchronous, so it renders immediately on every mount/period change;
+ * the async native/local-model AI enhancement then upgrades the text in
+ * place if/when it resolves, without ever blocking the initial display.
+ * A Week/Month toggle switches which period is summarized (independent of
+ * the chartPeriod toggle above — this one has its own state since a user
+ * may want to read the charts in one period and the recap in another). */
+function FinanceHealthTile({ input }: { input: MonthInReviewInput }) {
+  const [period, setPeriod] = useState<ChartPeriod>('month')
 
-  async function loadReview() {
-    setLoading(true)
-    setError(false)
-    try {
-      const review = await generateMonthInReview(input)
-      setResult(review)
-    } catch {
-      // generateNarrative() already guarantees a template fallback and never
-      // throws, but buildMonthInReviewFallback's own inputs are technically
-      // caller-controlled — keep a defensive error state so a tap never just
-      // hangs or silently shows nothing if something upstream misbehaves.
-      setError(true)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const fallbackText = period === 'week' ? buildWeekInReviewFallback(input) : buildMonthInReviewFallback(input)
+  const [result, setResult] = useState<{ text: string; tier: AiTier }>({ text: fallbackText, tier: 'template' })
 
-  function toggle() {
-    const next = !expanded
-    setExpanded(next)
-    if (next && !result && !loading) {
-      loadReview()
+  useEffect(() => {
+    let cancelled = false
+    const generate = period === 'week' ? generateWeekInReview : generateMonthInReview
+    generate(input).then((review) => {
+      if (!cancelled) setResult(review)
+    })
+    return () => {
+      cancelled = true
     }
-  }
+    // Re-runs on period change (and whenever the underlying data materially
+    // changes — length changes catch adds/removes; editing an existing
+    // transaction without adding/removing one may lag by one render before
+    // the AI-enhanced text catches up, which only affects the optional
+    // rephrasing layer, not the deterministic sentence below, which is
+    // always recomputed fresh on every render regardless).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, input.transactions.length, input.budgets.length, input.categories.length, input.accounts.length])
+
+  // While the AI upgrade is still catching up to a just-changed period, show
+  // the fresh synchronous fallback rather than a stale previous-period
+  // result lingering on screen.
+  const displayText = result.tier === 'template' ? fallbackText : result.text
 
   return (
-    <Card variants={fadeUpItem} layout className={`overflow-hidden !p-0 ${expanded ? 'col-span-2' : 'col-span-1'}`}>
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={toggle}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            toggle()
-          }
-        }}
-        className="flex w-full cursor-pointer flex-col gap-2 px-4 py-3 text-left"
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
-            <Newspaper size={16} />
-            <p className="text-xs font-semibold uppercase tracking-wide">Month in review</p>
-          </div>
-          <motion.div animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
-            <ChevronDown size={16} className="text-slate-400" />
-          </motion.div>
+    <Card variants={fadeUpItem} className="col-span-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+          <Newspaper size={16} />
+          <p className="text-xs font-semibold uppercase tracking-wide">Finance health</p>
         </div>
-        {!expanded && <p className="text-sm text-slate-500 dark:text-slate-400">Tap for your month in review</p>}
+        <PeriodToggle period={period} setPeriod={setPeriod} idPrefix="health" label="Finance health period" />
       </div>
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            variants={collapseItem}
-            initial="hidden"
-            animate="show"
-            exit="exit"
-            className="border-t border-slate-100 px-4 dark:border-slate-700/60"
-          >
-            <div className="py-3">
-              {loading && (
-                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                  <div
-                    className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600 dark:border-slate-700 dark:border-t-indigo-400"
-                    role="status"
-                    aria-label="Loading"
-                  />
-                  Putting together your recap…
-                </div>
-              )}
-              {!loading && error && (
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm text-slate-500 dark:text-slate-400" role="alert">
-                    Couldn't put together a recap right now.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      loadReview()
-                    }}
-                    className="shrink-0 text-sm font-medium text-indigo-600 dark:text-indigo-400"
-                  >
-                    Retry
-                  </button>
-                </div>
-              )}
-              {!loading && !error && result && (
-                <div className="space-y-2">
-                  <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{result.text}</p>
-                  {result.tier !== 'template' && (
-                    <span className="inline-flex shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                      AI-enhanced
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          </motion.div>
+      <div className="space-y-2">
+        <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{displayText}</p>
+        {result.tier !== 'template' && (
+          <span className="inline-flex shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+            AI-enhanced
+          </span>
         )}
-      </AnimatePresence>
+      </div>
     </Card>
   )
 }

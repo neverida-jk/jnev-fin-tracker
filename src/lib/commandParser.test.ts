@@ -378,7 +378,7 @@ describe('parseCommand — deleteBill', () => {
 })
 
 describe('parseCommand — deleteBudget', () => {
-  const budgets: Budget[] = [{ id: 1, categoryId: DINING, monthlyLimit: 3000 }]
+  const budgets: Budget[] = [{ id: 1, categoryId: DINING, period: 'monthly', limit: 3000 }]
 
   it('resolves a budget to clear by category', () => {
     const cmd = parseCommand('clear budget dining', { ...baseCtx, budgets })

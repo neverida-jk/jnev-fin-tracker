@@ -3,8 +3,11 @@ import {
   accountBalance,
   averageMonthlySpend,
   daysLeftInMonth,
+  daysLeftInWeek,
   spentByCategoryThisMonth,
+  spentByCategoryThisWeek,
   type MonthlyPoint,
+  type WeeklyPoint,
 } from './finance'
 import { currentMonthKey } from './dates'
 import { formatMoney } from './format'
@@ -23,13 +26,19 @@ import {
 export interface FinancialContext {
   monthKey: string
   daysLeftInMonth: number
+  daysLeftInWeek: number
   netWorth: number
   accounts: { name: string; balance: number }[]
   categories: {
     name: string
     kind: Category['kind']
-    budget?: number
+    /** Undefined when no budget is set. When set, `period` says whether
+     * `limit` should be compared against spentThisWeek or spentThisMonth —
+     * a weekly budget's pace is always judged against the week, regardless
+     * of any "this week / this month" view toggle elsewhere in the app. */
+    budget?: { limit: number; period: Budget['period'] }
     spentThisMonth: number
+    spentThisWeek: number
     avgMonthlyHistorical: number
   }[]
   incomeThisMonth: number
@@ -54,23 +63,42 @@ export function buildFinancialContext(
 
   const categoryRows = categories
     .filter((c) => !c.system)
-    .map((c) => ({
-      name: c.name,
-      kind: c.kind,
-      budget: budgets.find((b) => b.categoryId === c.id)?.monthlyLimit,
-      spentThisMonth: spentByCategoryThisMonth(transactions, c.id, today),
-      avgMonthlyHistorical: averageMonthlySpend(transactions, c.id, monthKey),
-    }))
+    .map((c) => {
+      const budget = budgets.find((b) => b.categoryId === c.id)
+      return {
+        name: c.name,
+        kind: c.kind,
+        budget: budget ? { limit: budget.limit, period: budget.period } : undefined,
+        spentThisMonth: spentByCategoryThisMonth(transactions, c.id, today),
+        spentThisWeek: spentByCategoryThisWeek(transactions, c.id, today),
+        avgMonthlyHistorical: averageMonthlySpend(transactions, c.id, monthKey),
+      }
+    })
 
   return {
     monthKey,
     daysLeftInMonth: daysLeftInMonth(today),
+    daysLeftInWeek: daysLeftInWeek(today),
     netWorth: accountRows.reduce((sum, a) => sum + a.balance, 0),
     accounts: accountRows,
     categories: categoryRows,
     incomeThisMonth: categoryRows.filter((c) => c.kind === 'income').reduce((sum, c) => sum + c.spentThisMonth, 0),
     expenseThisMonth: categoryRows.filter((c) => c.kind === 'expense').reduce((sum, c) => sum + c.spentThisMonth, 0),
   }
+}
+
+/** Picks the spend figure/day-count/label matching a budget's own period —
+ * a weekly budget is always judged against this week's spend and days left
+ * in the week, a monthly one against this month's, independent of any
+ * "this week / this month" view toggle elsewhere in the app. */
+function budgetProgress(
+  cat: FinancialContext['categories'][number],
+  context: FinancialContext,
+): { spent: number; limit: number; daysLeft: number; periodWord: 'week' | 'month' } | undefined {
+  if (!cat.budget) return undefined
+  return cat.budget.period === 'weekly'
+    ? { spent: cat.spentThisWeek, limit: cat.budget.limit, daysLeft: context.daysLeftInWeek, periodWord: 'week' }
+    : { spent: cat.spentThisMonth, limit: cat.budget.limit, daysLeft: context.daysLeftInMonth, periodWord: 'month' }
 }
 
 /** The always-available, fully offline answer — a deterministic template
@@ -84,14 +112,15 @@ export function composeLocalAnswer(context: FinancialContext, categoryName?: str
     const cat = context.categories.find((c) => c.name === categoryName)
     if (!cat) return `I don't have a "${categoryName}" category to check yet.`
 
-    if (cat.budget !== undefined) {
-      const remaining = cat.budget - cat.spentThisMonth
+    const progress = budgetProgress(cat, context)
+    if (progress) {
+      const remaining = progress.limit - progress.spent
       if (remaining >= 0) {
-        const perDay = remaining / context.daysLeftInMonth
-        const dayWord = context.daysLeftInMonth === 1 ? 'day' : 'days'
-        return `${cat.name}: ${formatMoney(remaining)} left of your ${formatMoney(cat.budget)} budget this month (spent ${formatMoney(cat.spentThisMonth)} so far) — about ${formatMoney(perDay)}/day for the next ${context.daysLeftInMonth} ${dayWord}.`
+        const perDay = remaining / progress.daysLeft
+        const dayWord = progress.daysLeft === 1 ? 'day' : 'days'
+        return `${cat.name}: ${formatMoney(remaining)} left of your ${formatMoney(progress.limit)} budget this ${progress.periodWord} (spent ${formatMoney(progress.spent)} so far) — about ${formatMoney(perDay)}/day for the next ${progress.daysLeft} ${dayWord}.`
       }
-      return `You're ${formatMoney(Math.abs(remaining))} over your ${cat.name} budget this month (spent ${formatMoney(cat.spentThisMonth)} of ${formatMoney(cat.budget)}).`
+      return `You're ${formatMoney(Math.abs(remaining))} over your ${cat.name} budget this ${progress.periodWord} (spent ${formatMoney(progress.spent)} of ${formatMoney(progress.limit)}).`
     }
 
     if (cat.avgMonthlyHistorical > 0) {
@@ -171,16 +200,21 @@ export function composePurchaseAdvice(context: FinancialContext, amount: number 
 
   const cat = categoryName ? context.categories.find((c) => c.name === categoryName) : undefined
   if (cat) {
-    const allowance = cat.budget ?? (cat.avgMonthlyHistorical > 0 ? cat.avgMonthlyHistorical : undefined)
-    if (allowance !== undefined) {
-      const remaining = allowance - cat.spentThisMonth
+    const progress = budgetProgress(cat, context)
+    const allowance = progress
+      ? { limit: progress.limit, spent: progress.spent, periodWord: progress.periodWord }
+      : cat.avgMonthlyHistorical > 0
+        ? { limit: cat.avgMonthlyHistorical, spent: cat.spentThisMonth, periodWord: 'month' as const }
+        : undefined
+    if (allowance) {
+      const remaining = allowance.limit - allowance.spent
       if (amount > remaining) {
-        return `That would put you ${formatMoney(amount - remaining)} over what's left in ${cat.name} this month (${formatMoney(Math.max(remaining, 0))} left of ${formatMoney(allowance)}) — I'd hold off or trim something else.${cooldownNote}`
+        return `That would put you ${formatMoney(amount - remaining)} over what's left in ${cat.name} this ${allowance.periodWord} (${formatMoney(Math.max(remaining, 0))} left of ${formatMoney(allowance.limit)}) — I'd hold off or trim something else.${cooldownNote}`
       }
       if (amount > remaining * PURCHASE_CAUTION_FRACTION) {
-        return `That's ${formatMoney(amount)} of the ${formatMoney(remaining)} you have left in ${cat.name} this month — doable, but it'll eat more than half of what's left.${cooldownNote}`
+        return `That's ${formatMoney(amount)} of the ${formatMoney(remaining)} you have left in ${cat.name} this ${allowance.periodWord} — doable, but it'll eat more than half of what's left.${cooldownNote}`
       }
-      return `You have ${formatMoney(remaining)} left in ${cat.name} this month, so ${formatMoney(amount)} fits comfortably.${cooldownNote}`
+      return `You have ${formatMoney(remaining)} left in ${cat.name} this ${allowance.periodWord}, so ${formatMoney(amount)} fits comfortably.${cooldownNote}`
     }
   }
 
@@ -220,22 +254,23 @@ const MIN_MONTH_FRACTION_ELAPSED_FOR_PACE_CHECK = 0.1
  * category currently qualifies. */
 export function composeBudgetPaceHighlight(context: FinancialContext): string | null {
   const candidates = context.categories
-    .filter((c) => c.kind === 'expense' && c.budget !== undefined && c.budget > 0)
+    .filter((c) => c.kind === 'expense' && c.budget && c.budget.limit > 0)
     .map((c) => {
-      const budget = c.budget as number
-      return { name: c.name, budget, spent: c.spentThisMonth, fraction: c.spentThisMonth / budget }
+      const progress = budgetProgress(c, context)
+      if (!progress) return undefined
+      return { name: c.name, ...progress, fraction: progress.spent / progress.limit }
     })
-    .filter((c) => c.fraction >= BUDGET_PACE_ALERT_THRESHOLD)
+    .filter((c): c is NonNullable<typeof c> => c !== undefined && c.fraction >= BUDGET_PACE_ALERT_THRESHOLD)
     .sort((a, b) => b.fraction - a.fraction)
 
   const top = candidates[0]
   if (!top) return null
 
-  const dayWord = context.daysLeftInMonth === 1 ? 'day' : 'days'
+  const dayWord = top.daysLeft === 1 ? 'day' : 'days'
   if (top.fraction >= 1) {
-    return `${top.name} is already over its ${formatMoney(top.budget)} budget this month, with ${context.daysLeftInMonth} ${dayWord} left.`
+    return `${top.name} is already over its ${formatMoney(top.limit)} budget this ${top.periodWord}, with ${top.daysLeft} ${dayWord} left.`
   }
-  return `${top.name} is already ${pct(top.fraction)} through its ${formatMoney(top.budget)} budget, with ${context.daysLeftInMonth} ${dayWord} left this month.`
+  return `${top.name} is already ${pct(top.fraction)} through its ${formatMoney(top.limit)} budget, with ${top.daysLeft} ${dayWord} left this ${top.periodWord}.`
 }
 
 /** "Overall spending is running hot/cool vs last month" — compares this
@@ -264,6 +299,34 @@ export function composeSpendingPaceHighlight(series: MonthlyPoint[], today: Date
 
   const direction = diffFraction > 0 ? 'above' : 'below'
   return `Spending this month is running about ${pct(Math.abs(diffFraction))} ${direction} last month's pace at this point (${formatMoney(current.expense)} so far vs ${formatMoney(expectedByNow)} expected by now).`
+}
+
+/** Week-over-week analog of composeSpendingPaceHighlight — compares this
+ * week's expense-so-far against what last week's total would suggest for
+ * the same point in the week (Monday-start, so "how far elapsed" is just
+ * ISO weekday / 7). Pass in at least 2 weeks (current + at least one
+ * prior) from buildWeeklySeries. Same early-week noise guard and minimum-gap
+ * threshold as the monthly version, reused as-is since both are small
+ * fractions of a period. */
+export function composeWeeklySpendingPaceHighlight(series: WeeklyPoint[], today: Date = new Date()): string | null {
+  if (series.length < 2) return null
+  const current = series[series.length - 1]
+  const prior = series[series.length - 2]
+  if (prior.expense <= 0) return null
+
+  const jsDay = today.getDay()
+  const isoDay = jsDay === 0 ? 7 : jsDay // 1 = Monday .. 7 = Sunday
+  const fractionElapsed = isoDay / 7
+  if (fractionElapsed < MIN_MONTH_FRACTION_ELAPSED_FOR_PACE_CHECK) return null
+
+  const expectedByNow = prior.expense * fractionElapsed
+  if (expectedByNow <= 0) return null
+
+  const diffFraction = (current.expense - expectedByNow) / expectedByNow
+  if (Math.abs(diffFraction) < SPENDING_PACE_ALERT_FRACTION) return null
+
+  const direction = diffFraction > 0 ? 'above' : 'below'
+  return `Spending this week is running about ${pct(Math.abs(diffFraction))} ${direction} last week's pace at this point (${formatMoney(current.expense)} so far vs ${formatMoney(expectedByNow)} expected by now).`
 }
 
 /** The single best personalized, data-grounded insight to surface — or null

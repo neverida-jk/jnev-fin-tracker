@@ -92,6 +92,14 @@ export function daysLeftInMonth(today: Date = new Date()): number {
   return Math.max(1, totalDays - today.getDate() + 1)
 }
 
+/** Days left in the current Monday-start calendar week, including today —
+ * mirrors daysLeftInMonth for weekly budgets/allowances. */
+export function daysLeftInWeek(today: Date = new Date()): number {
+  const jsDay = today.getDay() // 0 = Sunday .. 6 = Saturday
+  const isoDay = jsDay === 0 ? 7 : jsDay // 1 = Monday .. 7 = Sunday
+  return Math.max(1, 8 - isoDay)
+}
+
 export interface MonthlyPoint {
   monthKey: string
   income: number
