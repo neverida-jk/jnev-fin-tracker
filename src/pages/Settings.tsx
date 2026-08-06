@@ -17,12 +17,15 @@ import {
   X,
   Archive,
   ArchiveRestore,
+  Sparkles,
+  FileText,
 } from 'lucide-react'
 import Card from '../components/Card'
 import PickerGrid, { type PickerItem } from '../components/PickerGrid'
 import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import { staggerContainer, fadeUpItem, tapScale } from '../lib/motion'
 import { exportBackup, importBackup } from '../lib/backup'
+import { detectNativeAi, isLocalModelEnabled, setLocalModelEnabled } from '../lib/aiEngine'
 import db, {
   addCategory,
   updateCategory,
@@ -75,6 +78,7 @@ export default function Settings() {
       <CategoriesSection />
       <WordsSection />
       <StorageSection />
+      <AiSection />
     </motion.div>
   )
 }
@@ -994,5 +998,116 @@ function StorageSection() {
         </div>
       )}
     </Card>
+  )
+}
+
+function AiSection() {
+  // null while detectNativeAi()'s promise is still in flight on mount.
+  const [nativeAi, setNativeAi] = useState<boolean | null>(null)
+  const [localModelEnabled, setLocalModelEnabledState] = useState(false)
+
+  useEffect(() => {
+    setLocalModelEnabledState(isLocalModelEnabled())
+    let cancelled = false
+    detectNativeAi().then((result) => {
+      if (!cancelled) setNativeAi(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  function handleToggleLocalModel() {
+    const next = !localModelEnabled
+    setLocalModelEnabled(next)
+    setLocalModelEnabledState(next)
+  }
+
+  return (
+    <Card variants={fadeUpItem}>
+      <h2 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-300">AI Assistant</h2>
+      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+        Narratives like Month in Review can optionally be rephrased by AI for a more natural read.
+        This is entirely optional — the app already works well without it via built-in templates.
+      </p>
+
+      {nativeAi === null ? (
+        <p className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <Loader2 size={14} className="animate-spin" /> Checking for on-device AI...
+        </p>
+      ) : nativeAi ? (
+        <div className="flex items-center gap-2 text-sm">
+          <Sparkles size={18} className="shrink-0 text-indigo-600 dark:text-indigo-400" />
+          <span className="text-slate-700 dark:text-slate-300">
+            Built-in on-device AI detected — narratives will use it automatically.
+          </span>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm">
+            {localModelEnabled ? (
+              <Sparkles size={18} className="shrink-0 text-indigo-600 dark:text-indigo-400" />
+            ) : (
+              <FileText size={18} className="shrink-0 text-slate-400 dark:text-slate-500" />
+            )}
+            <span className="text-slate-700 dark:text-slate-300">
+              {localModelEnabled
+                ? 'Local AI model: on — narratives will use it once the model has downloaded.'
+                : 'Using built-in templates (no AI enhancement active).'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700/60">
+            <div className="min-w-0 pr-2">
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Local AI model</p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Turning this on downloads a small AI model (roughly 150–300MB) the first time it's
+                needed. After that first download, it runs fully offline. Optional — built-in
+                templates already work well without it.
+              </p>
+            </div>
+            <ToggleSwitch
+              checked={localModelEnabled}
+              onChange={handleToggleLocalModel}
+              label={localModelEnabled ? 'On' : 'Off'}
+            />
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function ToggleSwitch({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean
+  onChange: () => void
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onChange}
+      className="flex shrink-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400"
+    >
+      <span
+        className={`relative h-5 w-9 rounded-full transition-colors ${
+          checked ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-600'
+        }`}
+      >
+        <motion.span
+          layout
+          transition={{ type: 'spring', stiffness: 500, damping: 32 }}
+          className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow"
+          style={{ left: checked ? 18 : 2 }}
+        />
+      </span>
+      {label}
+    </button>
   )
 }

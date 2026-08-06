@@ -1,16 +1,31 @@
+import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { motion } from 'framer-motion'
-import { TrendingUp, Plus, Wallet, PiggyBank, CalendarClock, BarChart3, AlertTriangle, Sparkles } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import {
+  TrendingUp,
+  Plus,
+  Wallet,
+  PiggyBank,
+  CalendarClock,
+  BarChart3,
+  AlertTriangle,
+  Sparkles,
+  Newspaper,
+  ChevronDown,
+} from 'lucide-react'
 import db from '../db'
 import PendingPayoutBanner from '../components/PendingPayoutBanner'
 import AnimatedMoney from '../components/AnimatedMoney'
 import Tile from '../components/Tile'
+import Card from '../components/Card'
 import { formatMoney } from '../lib/format'
 import { netWorth, spentByCategoryThisMonth, buildMonthlySeries } from '../lib/finance'
 import { buildFinancialContext, composePersonalizedHighlight } from '../lib/financialContext'
 import { detectUnusualSpend } from '../lib/anomalyDetection'
 import { getUpcomingUnpaidBills } from '../lib/bills'
-import { staggerContainer, fadeUpItem } from '../lib/motion'
+import { staggerContainer, fadeUpItem, collapseItem } from '../lib/motion'
+import { generateMonthInReview, type MonthInReviewInput } from '../lib/monthInReview'
+import type { AiTier } from '../lib/aiEngine'
 
 export default function Dashboard() {
   const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
@@ -45,6 +60,14 @@ export default function Dashboard() {
 
   const budgetsSpan = (budgets?.length ?? 0) > 0 ? 'col-span-2' : 'col-span-1'
   const billsSpan = upcomingBills.length > 1 ? 'col-span-2' : 'col-span-1'
+
+  const monthInReviewInput: MonthInReviewInput = {
+    transactions: transactions ?? [],
+    categories: categories ?? [],
+    budgets: budgets ?? [],
+    accounts: accounts ?? [],
+    transfers: transfers ?? [],
+  }
 
   return (
     <div className="pb-4">
@@ -176,7 +199,126 @@ export default function Dashboard() {
             Reports & trends
           </p>
         </Tile>
+
+        <MonthInReviewTile input={monthInReviewInput} />
       </motion.div>
     </div>
+  )
+}
+
+/** Expand-in-place recap tile, mirroring the account-history expand pattern
+ * in Accounts.tsx (clickable header with a rotating chevron, AnimatePresence
+ * + collapseItem for the panel). Collapsed by default with a short teaser;
+ * on first expand it calls generateMonthInReview() (native AI / opt-in local
+ * model / deterministic template, in that order) and caches the result so
+ * re-collapsing/expanding doesn't refetch. */
+function MonthInReviewTile({ input }: { input: MonthInReviewInput }) {
+  const [expanded, setExpanded] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{ text: string; tier: AiTier } | null>(null)
+  const [error, setError] = useState(false)
+
+  async function loadReview() {
+    setLoading(true)
+    setError(false)
+    try {
+      const review = await generateMonthInReview(input)
+      setResult(review)
+    } catch {
+      // generateNarrative() already guarantees a template fallback and never
+      // throws, but buildMonthInReviewFallback's own inputs are technically
+      // caller-controlled — keep a defensive error state so a tap never just
+      // hangs or silently shows nothing if something upstream misbehaves.
+      setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function toggle() {
+    const next = !expanded
+    setExpanded(next)
+    if (next && !result && !loading) {
+      loadReview()
+    }
+  }
+
+  return (
+    <Card variants={fadeUpItem} layout className={`overflow-hidden !p-0 ${expanded ? 'col-span-2' : 'col-span-1'}`}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            toggle()
+          }
+        }}
+        className="flex w-full cursor-pointer flex-col gap-2 px-4 py-3 text-left"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+            <Newspaper size={16} />
+            <p className="text-xs font-semibold uppercase tracking-wide">Month in review</p>
+          </div>
+          <motion.div animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
+            <ChevronDown size={16} className="text-slate-400" />
+          </motion.div>
+        </div>
+        {!expanded && <p className="text-sm text-slate-500 dark:text-slate-400">Tap for your month in review</p>}
+      </div>
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            variants={collapseItem}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            className="border-t border-slate-100 px-4 dark:border-slate-700/60"
+          >
+            <div className="py-3">
+              {loading && (
+                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                  <div
+                    className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600 dark:border-slate-700 dark:border-t-indigo-400"
+                    role="status"
+                    aria-label="Loading"
+                  />
+                  Putting together your recap…
+                </div>
+              )}
+              {!loading && error && (
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm text-slate-500 dark:text-slate-400" role="alert">
+                    Couldn't put together a recap right now.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      loadReview()
+                    }}
+                    className="shrink-0 text-sm font-medium text-indigo-600 dark:text-indigo-400"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+              {!loading && !error && result && (
+                <div className="space-y-2">
+                  <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{result.text}</p>
+                  {result.tier !== 'template' && (
+                    <span className="inline-flex shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                      AI-enhanced
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Card>
   )
 }
