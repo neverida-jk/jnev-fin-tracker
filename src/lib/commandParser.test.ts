@@ -8,6 +8,8 @@ import {
   parseCommand,
   type ParseContext,
 } from './commandParser'
+import { todayISO } from './dates'
+import { formatMoney } from './format'
 
 const GCASH = 1
 const GOTYME = 2
@@ -436,5 +438,144 @@ describe('parseCommand — learned aliases', () => {
     const cmd = parseCommand('expense 50 jeep gcash', { ...baseCtx, aliases })
     expect(cmd.categoryId).toBe(DINING)
     expect(cmd.categoryConfidence).toBe('exact')
+  })
+})
+
+// The three new query sub-intents (time-range spend, biggest category,
+// month-over-month) all resolve their date range from parseCommand's real
+// `new Date()` — parseCommand itself takes no injectable "today", unlike
+// parseRelativeRange/buildMonthlySeries which do. These helpers reproduce
+// that same real-clock month arithmetic so the fixtures land in whatever the
+// actual "this month"/"last month" happen to be when the suite runs, rather
+// than hardcoding dates that would silently stop matching after this month.
+function monthsAgoISO(monthsAgo: number, day = 15): string {
+  const now = new Date()
+  return todayISO(new Date(now.getFullYear(), now.getMonth() - monthsAgo, day))
+}
+
+describe('parseCommand — time-range spend query', () => {
+  const transactions: Transaction[] = [
+    { id: 1, accountId: GCASH, categoryId: DINING, amount: 300, date: monthsAgoISO(1), note: '', createdAt: '' },
+    { id: 2, accountId: GCASH, categoryId: GROCERIES, amount: 150, date: monthsAgoISO(1, 10), note: '', createdAt: '' },
+    // This month's spend must NOT leak into a "last month" answer.
+    { id: 3, accountId: GCASH, categoryId: DINING, amount: 999, date: monthsAgoISO(0), note: '', createdAt: '' },
+  ]
+
+  it('answers a category-specific past-tense spend question for a named range', () => {
+    const cmd = parseCommand('how much did i spend on dining last month', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toContain('Dining')
+    expect(cmd.summary).toContain(formatMoney(300))
+    expect(cmd.summary).toContain('last month')
+    expect(cmd.summary).not.toContain(formatMoney(999))
+  })
+
+  it('answers a total (no category named) past-tense spend question for a named range', () => {
+    const cmd = parseCommand('how much did i spend last month', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toContain(formatMoney(450)) // 300 (dining) + 150 (groceries)
+    expect(cmd.summary).toContain('last month')
+  })
+
+  it('falls through unchanged to the existing this-month fallback when no range phrase is present', () => {
+    // No "last month"/"this year"/etc — parseRelativeRange returns null, so
+    // this must NOT be answered by the new range logic; it should still hit
+    // the pre-existing composeLocalAnswer path (present-tense "how much can I
+    // spend" phrasing already covered elsewhere, but "how much did i spend on
+    // dining" with no period is new phrasing for the *old* branch to catch).
+    const cmd = parseCommand('how much did i spend on dining', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).not.toContain('last month')
+  })
+})
+
+describe('parseCommand — biggest category query', () => {
+  // Day 1 is used for "this month" fixtures below (rather than the
+  // monthsAgoISO default of 15) because parseRelativeRange's "this month"
+  // range only runs from the 1st through *today* (not the end of the
+  // month) — a date later than today's day-of-month would be silently
+  // excluded depending on what day the suite happens to run.
+  it('reports the top-spending category, defaulting to this month when no range phrase is given', () => {
+    const transactions: Transaction[] = [
+      { id: 1, accountId: GCASH, categoryId: DINING, amount: 1000, date: monthsAgoISO(0, 1), note: '', createdAt: '' },
+      { id: 2, accountId: GCASH, categoryId: GROCERIES, amount: 200, date: monthsAgoISO(0, 1), note: '', createdAt: '' },
+    ]
+    const cmd = parseCommand("what's my biggest expense category", { ...baseCtx, transactions })
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toContain('Dining')
+    expect(cmd.summary).toContain(formatMoney(1000))
+  })
+
+  it('resolves a "spend the most on" phrasing the same way', () => {
+    const transactions: Transaction[] = [
+      { id: 1, accountId: GCASH, categoryId: RENT, amount: 8000, date: monthsAgoISO(0, 1), note: '', createdAt: '' },
+      { id: 2, accountId: GCASH, categoryId: DINING, amount: 500, date: monthsAgoISO(0, 1), note: '', createdAt: '' },
+    ]
+    const cmd = parseCommand('what did i spend the most on', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toContain('Rent')
+  })
+
+  it('reports a graceful message instead of a fabricated ranking when there is no spend at all', () => {
+    const cmd = parseCommand("what's my biggest expense category", { ...baseCtx, transactions: [] })
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toContain('No expenses logged in that period yet')
+  })
+})
+
+describe('parseCommand — month-over-month comparison query', () => {
+  it('compares this month against last month when there is enough history', () => {
+    // NOTE: composeSpendingPaceHighlight also requires the real day-of-month
+    // to be far enough into the month (>=10%) before it will draw a
+    // conclusion, and parseCommand has no injectable "today" for this branch
+    // — so this assertion relies on the suite not being run on the 1st-3rd of
+    // a month. The 10x gap between prior/current spend is deliberately large
+    // so the "above"/"below" verdict itself is robust for the rest of the month.
+    const transactions: Transaction[] = [
+      { id: 1, accountId: GCASH, categoryId: DINING, amount: 1000, date: monthsAgoISO(1), note: '', createdAt: '' },
+      { id: 2, accountId: GCASH, categoryId: DINING, amount: 5000, date: monthsAgoISO(0), note: '', createdAt: '' },
+    ]
+    const cmd = parseCommand('am i spending more than last month', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).not.toBe('Not enough history yet to compare this month against last month.')
+    expect(cmd.summary).toContain('above')
+  })
+
+  it('falls back to a graceful message when there is not enough history to compare', () => {
+    const transactions: Transaction[] = [
+      { id: 1, accountId: GCASH, categoryId: DINING, amount: 500, date: monthsAgoISO(0), note: '', createdAt: '' },
+    ]
+    const cmd = parseCommand('am i spending more than last month', { ...baseCtx, transactions })
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toBe('Not enough history yet to compare this month against last month.')
+  })
+
+  it('recognizes the "is this month more/less than last month" phrasing too', () => {
+    const cmd = parseCommand('is this month more than last month', { ...baseCtx, transactions: [] })
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toBe('Not enough history yet to compare this month against last month.')
+  })
+})
+
+describe('parseCommand — regression: pre-existing query intents unaffected by the new range patterns', () => {
+  it('still routes "how\'s my budget?" to the budget-health check, not any of the new branches', () => {
+    const cmd = parseCommand("how's my budget?", baseCtx)
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toContain('No income logged yet this month')
+    expect(cmd.summary).not.toContain('biggest')
+    expect(cmd.summary).not.toContain('last month')
+  })
+
+  it('still routes "should i buy X for Y" to purchase advice, not any of the new branches', () => {
+    const cmd = parseCommand('should i buy a 3000 phone case', baseCtx)
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).not.toContain('biggest')
+    expect(cmd.summary).not.toBe('Not enough history yet to compare this month against last month.')
+  })
+
+  it('still routes a present-tense "how much can I spend on X" to the existing this-month answer', () => {
+    const cmd = parseCommand('how much can I spend on dining', baseCtx)
+    expect(cmd.type).toBe('query')
+    expect(cmd.summary).toContain('Dining')
   })
 })

@@ -10,11 +10,18 @@ import type {
   Transfer,
 } from '../db'
 import { parseISODate, todayISO } from './dates'
-import { signedAmount } from './finance'
+import { buildMonthlySeries, signedAmount } from './finance'
 import { formatMoney } from './format'
 import { CATEGORY_KEYWORDS } from './categoryLexicon'
-import { buildFinancialContext, composeBudgetHealthCheck, composeLocalAnswer, composePurchaseAdvice } from './financialContext'
+import {
+  buildFinancialContext,
+  composeBudgetHealthCheck,
+  composeLocalAnswer,
+  composePurchaseAdvice,
+  composeSpendingPaceHighlight,
+} from './financialContext'
 import { getNextPendingPayout } from './payout'
+import { parseRelativeRange, rankExpenseCategoriesInRange, sumExpenseInRange, totalExpenseInRange } from './rangeQuery'
 
 export type ParsedCommandType =
   | 'expense'
@@ -310,13 +317,37 @@ const PURCHASE_RE = /\b(should i buy|can i buy|worth buying|worth it|is it worth
 // as opposed to a question about one specific category.
 const BUDGET_HEALTH_RE = /\b(how(?:'s| is) my budget|is my budget (good|ok|okay|fine|healthy)|am i doing (good|ok|okay|well)|how am i doing (financially|with money|money-wise))\b/
 
+// "How much did I spend on dining last month?" — a time-range spend lookup,
+// as opposed to QUERY_RE's own present-tense "how much can/should I spend"
+// (which already routes to the existing this-month-only answer). Requires
+// the explicit past-tense "did/have ... spend/spent" so the two never
+// collide.
+const TIME_RANGE_SPEND_RE = /\bhow much (?:did|have) i spen[dt]\b/
+
+// "What's my biggest expense category?" / "what did I spend the most on
+// (this year)?" — a top-category-in-a-range lookup.
+const BIGGEST_CATEGORY_RE =
+  /\b(biggest (?:expense )?category|spen[dt] (?:the )?most on|most (?:expensive|spent) category)\b/
+
+// "Am I spending more/less than last month?" / "is this month more than last
+// month?" — a month-over-month spending-pace comparison.
+const MOM_COMPARISON_RE = /\b(spending (?:more|less) than last month|this month (?:more|less) than last month)\b/
+
 // The single gate for "is this a question, not a transaction" — the union of
-// all three patterns above, so PURCHASE_RE/BUDGET_HEALTH_RE phrasings that
-// don't happen to also match QUERY_RE (e.g. "is it worth buying...", "how is
-// my budget") still get routed into the query branch instead of falling
-// through and getting misfiled as a transaction.
+// all patterns above, so a phrasing that doesn't happen to also match
+// QUERY_RE (e.g. "is it worth buying...", "how is my budget", "what did i
+// spend the most on") still gets routed into the query branch instead of
+// falling through and getting misfiled as a transaction.
 function isBudgetQuery(text: string): boolean {
-  return QUERY_RE.test(text) || PURCHASE_RE.test(text) || BUDGET_HEALTH_RE.test(text) || text.trim().endsWith('?')
+  return (
+    QUERY_RE.test(text) ||
+    PURCHASE_RE.test(text) ||
+    BUDGET_HEALTH_RE.test(text) ||
+    TIME_RANGE_SPEND_RE.test(text) ||
+    BIGGEST_CATEGORY_RE.test(text) ||
+    MOM_COMPARISON_RE.test(text) ||
+    text.trim().endsWith('?')
+  )
 }
 
 const AMOUNT_RE = /(\d[\d,]*(?:\.\d+)?)/
@@ -921,6 +952,71 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
         date,
         raw,
         summary: composeBudgetHealthCheck(financialContext),
+      }
+    }
+
+    // Time-range spend: "how much did i spend on dining last month", "how
+    // much did i spend this year". Only handled when parseRelativeRange
+    // recognizes an actual time-range phrase — otherwise (e.g. "how much did
+    // i spend on dining" with no period) this falls through unchanged to the
+    // existing this-month-only fallback below.
+    if (TIME_RANGE_SPEND_RE.test(text)) {
+      const range = parseRelativeRange(text)
+      if (range) {
+        const category = findMentionedCategory(text, expenseCategories, aliases)
+        if (category) {
+          const amount = sumExpenseInRange(ctx.transactions ?? [], category.id, range)
+          return {
+            type: 'query',
+            date,
+            raw,
+            summary: `You spent ${formatMoney(amount)} on ${category.name} ${range.label}.`,
+          }
+        }
+        const total = totalExpenseInRange(ctx.transactions ?? [], ctx.categories, range)
+        return {
+          type: 'query',
+          date,
+          raw,
+          summary: `You spent ${formatMoney(total)} in total ${range.label}.`,
+        }
+      }
+    }
+
+    // Biggest category: "whats my biggest expense category", "what did i
+    // spend the most on", optionally with a time-range phrase appended
+    // ("...this year"). Defaults to the current month when no range phrase
+    // is present — parseRelativeRange('this month', ...) always resolves, so
+    // the `range` fallback below is never actually null in practice, but the
+    // explicit check keeps this branch honest rather than asserting it away.
+    if (BIGGEST_CATEGORY_RE.test(text)) {
+      const range = parseRelativeRange(text) ?? parseRelativeRange('this month', new Date())
+      if (range) {
+        const [top] = rankExpenseCategoriesInRange(ctx.transactions ?? [], ctx.categories, range, 1)
+        return {
+          type: 'query',
+          date,
+          raw,
+          summary: top
+            ? `Your biggest expense category ${range.label} is ${top.name} at ${formatMoney(top.amount)}.`
+            : `No expenses logged in that period yet (${range.label}).`,
+        }
+      }
+    }
+
+    // Month-over-month comparison: "am i spending more than last month", "is
+    // this month more than last month". Reuses buildMonthlySeries +
+    // composeSpendingPaceHighlight (the same logic already driving the
+    // dashboard's spending-pace insight) instead of duplicating the math.
+    if (MOM_COMPARISON_RE.test(text)) {
+      const categoriesById = new Map(ctx.categories.map((c) => [c.id, c]))
+      const series = buildMonthlySeries(ctx.accounts, ctx.transactions ?? [], categoriesById, 2)
+      const highlight = composeSpendingPaceHighlight(series)
+      return {
+        type: 'query',
+        date,
+        raw,
+        summary: highlight ?? 'Not enough history yet to compare this month against last month.',
       }
     }
 
