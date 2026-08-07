@@ -39,6 +39,26 @@ export function isNetWorthTracked(account: Account): boolean {
   return account.type !== 'investment'
 }
 
+/** Net amount actually moved into savings-type accounts this month — the
+ * real, verifiable "saved" figure. Unspent income isn't automatically
+ * "saved" just because it hasn't been spent yet; this only counts money
+ * that's actually been transferred somewhere set aside for it, and nets out
+ * a withdrawal from savings the same month (same as a bank statement
+ * would). Transfers where both sides (or neither) are savings accounts net
+ * to no change either way. */
+export function netTransferredToSavings(accounts: Account[], transfers: Transfer[], monthKey: string): number {
+  const savingsAccountIds = new Set(accounts.filter((a) => a.type === 'savings').map((a) => a.id))
+  return transfers
+    .filter((tr) => tr.date.startsWith(monthKey))
+    .reduce((sum, tr) => {
+      const toSavings = savingsAccountIds.has(tr.toAccountId)
+      const fromSavings = savingsAccountIds.has(tr.fromAccountId)
+      if (toSavings && !fromSavings) return sum + tr.amount
+      if (fromSavings && !toSavings) return sum - tr.amount
+      return sum
+    }, 0)
+}
+
 export function netWorth(
   accounts: Account[],
   transactions: Transaction[],

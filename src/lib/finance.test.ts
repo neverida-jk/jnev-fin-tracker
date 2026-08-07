@@ -7,6 +7,7 @@ import {
   buildWeeklySeries,
   daysLeftInMonth,
   isNetWorthTracked,
+  netTransferredToSavings,
   netWorth,
   signedAmount,
   spentByCategoryThisMonth,
@@ -94,6 +95,35 @@ describe('isNetWorthTracked', () => {
     expect(isNetWorthTracked(gcash)).toBe(true)
     expect(isNetWorthTracked(savings)).toBe(true)
     expect(isNetWorthTracked(gotrade)).toBe(false)
+  })
+})
+
+describe('netTransferredToSavings', () => {
+  it('counts a transfer into a savings account', () => {
+    const transfers = [transfer({ fromAccountId: gcash.id, toAccountId: savings.id, amount: 1500, date: '2026-07-10' })]
+    expect(netTransferredToSavings([gcash, savings], transfers, '2026-07')).toBe(1500)
+  })
+
+  it('nets out a withdrawal from savings the same month', () => {
+    const transfers = [
+      transfer({ fromAccountId: gcash.id, toAccountId: savings.id, amount: 1500, date: '2026-07-10' }),
+      transfer({ fromAccountId: savings.id, toAccountId: gcash.id, amount: 500, date: '2026-07-20' }),
+    ]
+    expect(netTransferredToSavings([gcash, savings], transfers, '2026-07')).toBe(1000)
+  })
+
+  it('ignores a transfer between two non-savings accounts', () => {
+    const transfers = [transfer({ fromAccountId: gcash.id, toAccountId: gotrade.id, amount: 6000, date: '2026-07-10' })]
+    expect(netTransferredToSavings([gcash, savings, gotrade], transfers, '2026-07')).toBe(0)
+  })
+
+  it('ignores a transfer dated outside the given month', () => {
+    const transfers = [transfer({ fromAccountId: gcash.id, toAccountId: savings.id, amount: 1500, date: '2026-06-30' })]
+    expect(netTransferredToSavings([gcash, savings], transfers, '2026-07')).toBe(0)
+  })
+
+  it('is 0 with no savings account at all, regardless of unspent income', () => {
+    expect(netTransferredToSavings([gcash], [], '2026-07')).toBe(0)
   })
 })
 

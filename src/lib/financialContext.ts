@@ -5,6 +5,7 @@ import {
   daysLeftInMonth,
   daysLeftInWeek,
   isNetWorthTracked,
+  netTransferredToSavings,
   spentByCategoryThisMonth,
   spentByCategoryThisWeek,
   type MonthlyPoint,
@@ -45,6 +46,11 @@ export interface FinancialContext {
   }[]
   incomeThisMonth: number
   expenseThisMonth: number
+  /** Net amount actually transferred into savings-type accounts this month
+   * — see netTransferredToSavings in finance.ts. Not the same as "income
+   * minus expenses": unspent money sitting in checking hasn't been saved,
+   * it just hasn't been spent yet. */
+  savedThisMonth: number
 }
 
 export function buildFinancialContext(
@@ -89,6 +95,7 @@ export function buildFinancialContext(
     categories: categoryRows,
     incomeThisMonth: categoryRows.filter((c) => c.kind === 'income').reduce((sum, c) => sum + c.spentThisMonth, 0),
     expenseThisMonth: categoryRows.filter((c) => c.kind === 'expense').reduce((sum, c) => sum + c.spentThisMonth, 0),
+    savedThisMonth: netTransferredToSavings(accounts, transfers, monthKey),
   }
 }
 
@@ -151,22 +158,22 @@ export function composeLocalAnswer(context: FinancialContext, categoryName?: str
   return `Based on your past spending: ${breakdown} (~${formatMoney(total)}/month total). Set these as budgets in the Budgets tab.`
 }
 
-/** "How much should I set aside?" — the 20% savings slice of the classic
- * 50/30/20 guideline, minus whatever's already been saved this month
- * (income minus expenses so far). Mirrors composeBudgetHealthCheck's math,
- * distilled to one actionable figure instead of a full recap — meant for a
- * persistent, glanceable spot rather than an on-demand question. */
+/** "How much should I set aside?" — the gap between the 20% savings slice
+ * of the classic 50/30/20 guideline and what's actually been transferred
+ * into savings this month (context.savedThisMonth — real money moved, not
+ * unspent income assumed to be saved). Distilled to one actionable figure
+ * instead of a full recap — meant for a persistent, glanceable spot rather
+ * than an on-demand question. */
 export function composeSuggestedSavings(context: FinancialContext): string {
   if (context.incomeThisMonth <= 0) {
     return 'Log income to see a suggested savings amount'
   }
 
-  const savedSoFar = context.incomeThisMonth - context.expenseThisMonth
   const target = context.incomeThisMonth * BUDGET_RULE_50_30_20.savings
-  const remaining = target - savedSoFar
+  const remaining = target - context.savedThisMonth
 
   if (remaining <= 0) {
-    return `Already saved ${formatMoney(savedSoFar)} this month — past the ${pct(BUDGET_RULE_50_30_20.savings)} savings guideline`
+    return `Already put aside ${formatMoney(context.savedThisMonth)} this month — past the ${pct(BUDGET_RULE_50_30_20.savings)} savings guideline`
   }
 
   return `Put aside ${formatMoney(remaining)} more this month to hit your ${pct(BUDGET_RULE_50_30_20.savings)} savings guideline`
@@ -186,7 +193,7 @@ export function composeBudgetHealthCheck(context: FinancialContext): string {
   const expenseCats = context.categories.filter((c) => c.kind === 'expense')
   const needsSpend = expenseCats.filter((c) => c.isNeed).reduce((s, c) => s + c.spentThisMonth, 0)
   const wantsSpend = expenseCats.filter((c) => !c.isNeed).reduce((s, c) => s + c.spentThisMonth, 0)
-  const saved = context.incomeThisMonth - context.expenseThisMonth
+  const saved = context.savedThisMonth
 
   const needsPct = needsSpend / context.incomeThisMonth
   const wantsPct = wantsSpend / context.incomeThisMonth

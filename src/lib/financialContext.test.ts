@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Account, Budget, Category, Transaction } from '../db'
+import type { Account, Budget, Category, Transaction, Transfer } from '../db'
 import {
   buildFinancialContext,
   composeBudgetHealthCheck,
@@ -56,6 +56,18 @@ describe('buildFinancialContext', () => {
     const ctx = buildFinancialContext(accounts, categories, transactions, [], [], TODAY)
     expect(ctx.netWorth).toBe(1000)
   })
+
+  it('computes savedThisMonth from real transfers into a savings account, not unspent income', () => {
+    const accountsWithSavings: Account[] = [...accounts, { id: 2, name: 'Savings', type: 'savings', startingBalance: 0, createdAt: '' }]
+    const transactions: Transaction[] = [tx({ id: 1, categoryId: 1, amount: 20000, date: '2026-07-05' })] // income, none spent
+    const transfers: Transfer[] = [
+      { id: 1, fromAccountId: 1, toAccountId: 2, amount: 3000, date: '2026-07-10', note: '', createdAt: '' },
+    ]
+    const ctx = buildFinancialContext(accountsWithSavings, categories, transactions, transfers, [], TODAY)
+    // All 20000 of income is still unspent, but only the 3000 actually
+    // transferred to Savings counts as saved — not the full 20000.
+    expect(ctx.savedThisMonth).toBe(3000)
+  })
 })
 
 function makeContext(overrides: Partial<FinancialContext> = {}): FinancialContext {
@@ -68,6 +80,7 @@ function makeContext(overrides: Partial<FinancialContext> = {}): FinancialContex
     categories: [],
     incomeThisMonth: 0,
     expenseThisMonth: 0,
+    savedThisMonth: 0,
     ...overrides,
   }
 }
@@ -152,20 +165,21 @@ describe('composeBudgetHealthCheck', () => {
   it('reports healthy when the split matches 50/30/20 within tolerance', () => {
     const ctx = makeContext({
       incomeThisMonth: 10000,
-      expenseThisMonth: 8000,
+      savedThisMonth: 2000,
       categories: [
         { name: 'Rent', kind: 'expense', isNeed: true, spentThisMonth: 5000, spentThisWeek: 0, avgMonthlyHistorical: 0 },
         { name: 'Dining', kind: 'expense', isNeed: false, spentThisMonth: 3000, spentThisWeek: 0, avgMonthlyHistorical: 0 },
       ],
     })
-    // needs 50%, wants 30%, saved (10000-8000)/10000 = 20% — exactly on target
+    // needs 50%, wants 30%, saved 2000/10000 = 20% — exactly on target. Real
+    // transferred savings, not income-minus-expense — see savedThisMonth.
     expect(composeBudgetHealthCheck(ctx)).toContain('healthy')
   })
 
   it('flags needs, wants, and savings that are off guideline', () => {
     const ctx = makeContext({
       incomeThisMonth: 10000,
-      expenseThisMonth: 9500,
+      savedThisMonth: 500,
       categories: [
         { name: 'Rent', kind: 'expense', isNeed: true, spentThisMonth: 7000, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // needs 70% > 55%
         { name: 'Dining', kind: 'expense', isNeed: false, spentThisMonth: 2500, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // wants 25%
@@ -183,15 +197,15 @@ describe('composeSuggestedSavings', () => {
   })
 
   it('suggests putting aside the remaining gap to the 20% guideline', () => {
-    // saved so far = 10000 - 8500 = 1500; target = 10000 * 0.2 = 2000; gap = 500
-    const ctx = makeContext({ incomeThisMonth: 10000, expenseThisMonth: 8500 })
+    // target = 10000 * 0.2 = 2000; already transferred 1500 -> gap 500
+    const ctx = makeContext({ incomeThisMonth: 10000, savedThisMonth: 1500 })
     expect(composeSuggestedSavings(ctx)).toBe('Put aside ₱500.00 more this month to hit your 20% savings guideline')
   })
 
   it('says the guideline is already met when saved-so-far is at or above the 20% target', () => {
-    // saved so far = 10000 - 7000 = 3000, above the 2000 target
-    const ctx = makeContext({ incomeThisMonth: 10000, expenseThisMonth: 7000 })
-    expect(composeSuggestedSavings(ctx)).toBe('Already saved ₱3,000.00 this month — past the 20% savings guideline')
+    // 3000 transferred to savings this month, above the 2000 target
+    const ctx = makeContext({ incomeThisMonth: 10000, savedThisMonth: 3000 })
+    expect(composeSuggestedSavings(ctx)).toBe('Already put aside ₱3,000.00 this month — past the 20% savings guideline')
   })
 })
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Account, Budget, Category, Transaction } from '../db'
+import type { Account, Budget, Category, Transaction, Transfer } from '../db'
 import { buildMonthInReviewFallback, generateMonthInReview, type MonthInReviewInput } from './monthInReview'
 import { formatMoney } from './format'
 
@@ -7,7 +7,10 @@ import { formatMoney } from './format'
 // already used in financialContext.test.ts for the same reasoning).
 const TODAY = new Date(2026, 6, 15)
 
-const accounts: Account[] = [{ id: 1, name: 'GCash', type: 'checking', startingBalance: 0, createdAt: '' }]
+const accounts: Account[] = [
+  { id: 1, name: 'GCash', type: 'checking', startingBalance: 0, createdAt: '' },
+  { id: 2, name: 'Savings', type: 'savings', startingBalance: 0, createdAt: '' },
+]
 
 const categories: Category[] = [
   { id: 1, name: 'Salary', kind: 'income', color: '#0f0' },
@@ -31,7 +34,12 @@ function richInput(): MonthInReviewInput {
     tx({ id: 3, categoryId: 1, amount: 20000, date: '2026-07-05' }), // Salary, this month
     tx({ id: 4, amount: 4500, date: '2026-07-10' }), // Groceries, this month — 90% of budget, >2x the 2000 historical average
   ]
-  return { transactions, categories, budgets, accounts, transfers: [] }
+  // 4000 actually transferred to Savings this month (20% of income) — real
+  // saved money, not just unspent income assumed to be saved.
+  const transfers: Transfer[] = [
+    { id: 1, fromAccountId: 1, toAccountId: 2, amount: 4000, date: '2026-07-12', note: '', createdAt: '' },
+  ]
+  return { transactions, categories, budgets, accounts, transfers }
 }
 
 /** A brand-new install: no transactions, no budgets — nothing for

@@ -27,20 +27,21 @@ function payoutPhrase(days: number): string {
  * gone. Deliberately low-contrast so it never competes with page content or
  * the Quick Command FAB, which floats over its bottom-right corner. */
 export default function StatusStrip() {
+  const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
   const transactions = useLiveQuery(() => db.transactions.toArray(), [], [])
+  const transfers = useLiveQuery(() => db.transfers.toArray(), [], [])
   const categories = useLiveQuery(() => db.categories.toArray(), [], [])
   const budgets = useLiveQuery(() => db.budgets.toArray(), [], [])
   const payoutSchedules = useLiveQuery(() => db.payoutSchedules.toArray(), [], [])
   const payoutDates = useLiveQuery(() => db.payoutDates.toArray(), [], [])
 
-  const loading = !transactions || !categories || !budgets
+  const loading = !accounts || !transactions || !transfers || !categories || !budgets
 
-  // Net worth/accounts aren't part of what's shown here, so accounts and
-  // transfers are passed empty — buildFinancialContext only needs
-  // categories/transactions/budgets to produce incomeThisMonth/expenseThisMonth.
+  // accounts/transfers are needed now too — savedThisMonth reflects real
+  // transfers into savings-type accounts, not just unspent income.
   const savingsText = loading
     ? null
-    : composeSuggestedSavings(buildFinancialContext([], categories, transactions, [], budgets))
+    : composeSuggestedSavings(buildFinancialContext(accounts, categories, transactions, transfers, budgets))
 
   const nextPayout = getNextPendingPayout(payoutSchedules ?? [], payoutDates ?? [])
   const payoutText = nextPayout ? payoutPhrase(daysUntil(nextPayout.payoutDate.date)) : null
