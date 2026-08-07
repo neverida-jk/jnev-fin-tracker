@@ -28,16 +28,26 @@ export function accountBalance(
   return account.startingBalance + transactionNet + transferNet
 }
 
+/** Investment accounts (e.g. a brokerage funded for ETF/stock investing) are
+ * excluded from net worth — their real value moves with market prices and
+ * fees across positions this app was never meant to track trade-by-trade,
+ * so carrying forward the last transferred-in peso amount as "net worth"
+ * would just be a stale, wrong number. The transfer that funded one still
+ * correctly leaves the tracked accounts' balances; that's all this app
+ * claims to know once the money crosses over. */
+export function isNetWorthTracked(account: Account): boolean {
+  return account.type !== 'investment'
+}
+
 export function netWorth(
   accounts: Account[],
   transactions: Transaction[],
   transfers: Transfer[],
   categoriesById: Map<number, Category>,
 ): number {
-  return accounts.reduce(
-    (sum, account) => sum + accountBalance(account, transactions, transfers, categoriesById),
-    0,
-  )
+  return accounts
+    .filter(isNetWorthTracked)
+    .reduce((sum, account) => sum + accountBalance(account, transactions, transfers, categoriesById), 0)
 }
 
 export function spentByCategoryThisMonth(
@@ -110,13 +120,13 @@ export interface MonthlyPoint {
 export function buildMonthlySeries(
   accounts: Account[],
   transactions: Transaction[],
+  transfers: Transfer[],
   categoriesById: Map<number, Category>,
   monthsBack = 6,
   today: Date = new Date(),
 ): MonthlyPoint[] {
-  // Transfers move money between the user's own tracked accounts, so they
-  // never change the total — safe to ignore them for the net worth trend.
-  const startingTotal = accounts.reduce((sum, a) => sum + a.startingBalance, 0)
+  const trackedIds = new Set(accounts.filter(isNetWorthTracked).map((a) => a.id))
+  const startingTotal = accounts.filter(isNetWorthTracked).reduce((sum, a) => sum + a.startingBalance, 0)
   const points: MonthlyPoint[] = []
 
   for (let i = monthsBack - 1; i >= 0; i--) {
@@ -139,6 +149,19 @@ export function buildMonthlySeries(
         if (category.kind === 'income') income += t.amount
         else expense += t.amount
       }
+    }
+
+    // Transfers between two tracked accounts cancel out (money just moves
+    // within what's counted). A transfer crossing into/out of an untracked
+    // (investment) account is a real change to the tracked total — same
+    // effect as an expense/income would have, so it can't be ignored the
+    // way a same-side transfer safely is.
+    for (const tr of transfers) {
+      if (tr.date > monthEndKey) continue
+      const fromTracked = trackedIds.has(tr.fromAccountId)
+      const toTracked = trackedIds.has(tr.toAccountId)
+      if (fromTracked && !toTracked) cumulativeNet -= tr.amount
+      else if (!fromTracked && toTracked) cumulativeNet += tr.amount
     }
 
     points.push({ monthKey, income, expense, netWorth: startingTotal + cumulativeNet })

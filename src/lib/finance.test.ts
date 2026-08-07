@@ -3,8 +3,10 @@ import type { Account, Category, Transaction, Transfer } from '../db'
 import {
   accountBalance,
   averageMonthlySpend,
+  buildMonthlySeries,
   buildWeeklySeries,
   daysLeftInMonth,
+  isNetWorthTracked,
   netWorth,
   signedAmount,
   spentByCategoryThisMonth,
@@ -20,6 +22,7 @@ const categoriesById = new Map<number, Category>([
 
 const gcash: Account = { id: 1, name: 'GCash', type: 'checking', startingBalance: 1000, createdAt: '' }
 const savings: Account = { id: 2, name: 'Savings', type: 'savings', startingBalance: 0, createdAt: '' }
+const gotrade: Account = { id: 3, name: 'GoTrade', type: 'investment', startingBalance: 0, createdAt: '' }
 
 function tx(overrides: Partial<Transaction> = {}): Transaction {
   return { id: 1, accountId: gcash.id, categoryId: expense.id, amount: 100, date: '2026-07-15', note: '', createdAt: '', ...overrides }
@@ -77,6 +80,41 @@ describe('netWorth', () => {
   it('is unaffected by transactions whose category no longer resolves', () => {
     const transactions = [tx({ accountId: gcash.id, categoryId: 999, amount: 5000 })]
     expect(netWorth([gcash, savings], transactions, [], categoriesById)).toBe(1000)
+  })
+
+  it('excludes investment accounts, including money transferred into one', () => {
+    const transfers = [transfer({ amount: 400, fromAccountId: gcash.id, toAccountId: gotrade.id })]
+    // gcash: 1000 - 400 = 600; gotrade (400) excluded entirely.
+    expect(netWorth([gcash, savings, gotrade], [], transfers, categoriesById)).toBe(600)
+  })
+})
+
+describe('isNetWorthTracked', () => {
+  it('is false only for investment accounts', () => {
+    expect(isNetWorthTracked(gcash)).toBe(true)
+    expect(isNetWorthTracked(savings)).toBe(true)
+    expect(isNetWorthTracked(gotrade)).toBe(false)
+  })
+})
+
+describe('buildMonthlySeries net worth', () => {
+  it('drops a transfer into an investment account from the tracked total', () => {
+    const transfers = [transfer({ amount: 400, fromAccountId: gcash.id, toAccountId: gotrade.id, date: '2026-07-15' })]
+    const series = buildMonthlySeries([gcash, savings, gotrade], [], transfers, categoriesById, 1, new Date(2026, 6, 20))
+    // starting totals: gcash 1000 + savings 0 (gotrade's 0 excluded either way) - 400 moved out = 600.
+    expect(series[0].netWorth).toBe(600)
+  })
+
+  it('is unaffected by a transfer between two tracked accounts', () => {
+    const transfers = [transfer({ amount: 400, fromAccountId: gcash.id, toAccountId: savings.id, date: '2026-07-15' })]
+    const series = buildMonthlySeries([gcash, savings], [], transfers, categoriesById, 1, new Date(2026, 6, 20))
+    expect(series[0].netWorth).toBe(1000)
+  })
+
+  it('ignores a transfer dated after the month being computed', () => {
+    const transfers = [transfer({ amount: 400, fromAccountId: gcash.id, toAccountId: gotrade.id, date: '2026-08-01' })]
+    const series = buildMonthlySeries([gcash, savings, gotrade], [], transfers, categoriesById, 1, new Date(2026, 6, 20))
+    expect(series[0].netWorth).toBe(1000)
   })
 })
 

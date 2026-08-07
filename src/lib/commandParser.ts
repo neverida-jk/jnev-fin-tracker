@@ -1010,7 +1010,7 @@ export function parseCommand(rawInput: string, ctx: ParseContext): ParsedCommand
     // dashboard's spending-pace insight) instead of duplicating the math.
     if (MOM_COMPARISON_RE.test(text)) {
       const categoriesById = new Map(ctx.categories.map((c) => [c.id, c]))
-      const series = buildMonthlySeries(ctx.accounts, ctx.transactions ?? [], categoriesById, 2)
+      const series = buildMonthlySeries(ctx.accounts, ctx.transactions ?? [], ctx.transfers ?? [], categoriesById, 2)
       const highlight = composeSpendingPaceHighlight(series)
       return {
         type: 'query',

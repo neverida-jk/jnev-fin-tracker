@@ -4,6 +4,7 @@ import {
   averageMonthlySpend,
   daysLeftInMonth,
   daysLeftInWeek,
+  isNetWorthTracked,
   spentByCategoryThisMonth,
   spentByCategoryThisWeek,
   type MonthlyPoint,
@@ -57,7 +58,9 @@ export function buildFinancialContext(
   const categoriesById = new Map(categories.map((c) => [c.id, c]))
   const monthKey = currentMonthKey(today)
 
-  const accountRows = accounts.map((a) => ({
+  // Investment accounts are deliberately left out of net worth — see
+  // isNetWorthTracked in finance.ts for why.
+  const accountRows = accounts.filter(isNetWorthTracked).map((a) => ({
     name: a.name,
     balance: accountBalance(a, transactions, transfers, categoriesById),
   }))

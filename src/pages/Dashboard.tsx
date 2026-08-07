@@ -35,6 +35,7 @@ import { currentWeekKey } from '../lib/dates'
 import {
   accountBalance,
   netWorth,
+  isNetWorthTracked,
   spentByCategoryThisMonth,
   spentByCategoryThisWeek,
   buildMonthlySeries,
@@ -89,9 +90,14 @@ export default function Dashboard() {
   // redundant with the hero tile above it — surfacing the lowest-balance
   // account instead gives genuinely new information (which account to keep
   // an eye on), the same way a neobank app would.
+  // Investment accounts aren't spendable, so they'd never be a meaningful
+  // "which account is running low" flag — excluded the same way they're
+  // excluded from net worth (see isNetWorthTracked).
   const accountBalances = loading
     ? []
-    : accounts.map((a) => ({ name: a.name, balance: accountBalance(a, transactions, transfers ?? [], categoriesById) }))
+    : accounts
+        .filter(isNetWorthTracked)
+        .map((a) => ({ name: a.name, balance: accountBalance(a, transactions, transfers ?? [], categoriesById) }))
   const lowestBalanceAccount =
     accountBalances.length > 0 ? accountBalances.reduce((min, a) => (a.balance < min.balance ? a : min)) : null
   const upcomingBills = loading ? [] : getUpcomingUnpaidBills(bills).slice(0, 3)
@@ -103,7 +109,7 @@ export default function Dashboard() {
   // brand-new install with no history), insightMessage stays null and the
   // net worth tile shows nothing extra.
   const anomalies = loading ? [] : detectUnusualSpend(transactions, categories)
-  const monthlySeries = loading ? [] : buildMonthlySeries(accounts, transactions, categoriesById, 2)
+  const monthlySeries = loading ? [] : buildMonthlySeries(accounts, transactions, transfers ?? [], categoriesById, 2)
   const financialContext = loading
     ? null
     : buildFinancialContext(accounts, categories, transactions, transfers ?? [], budgets ?? [])
@@ -131,7 +137,7 @@ export default function Dashboard() {
     .filter((d) => d.value > 0)
 
   // Net worth trend is deliberately monthly-only, unaffected by chartPeriod.
-  const netWorthSeries = loading ? [] : buildMonthlySeries(accounts, transactions, categoriesById, 6)
+  const netWorthSeries = loading ? [] : buildMonthlySeries(accounts, transactions, transfers ?? [], categoriesById, 6)
   const netWorthChartData = netWorthSeries.map((p) => ({
     month: formatMonthLabel(p.monthKey),
     'Net worth': p.netWorth,
@@ -145,7 +151,7 @@ export default function Dashboard() {
           Income: p.income,
           Expense: p.expense,
         }))
-      : buildMonthlySeries(accounts, transactions, categoriesById, 6).map((p) => ({
+      : buildMonthlySeries(accounts, transactions, transfers ?? [], categoriesById, 6).map((p) => ({
           period: formatMonthLabel(p.monthKey),
           Income: p.income,
           Expense: p.expense,

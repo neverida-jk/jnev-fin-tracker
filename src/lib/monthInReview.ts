@@ -40,7 +40,7 @@ export function buildMonthInReviewFallback(input: MonthInReviewInput, today: Dat
   const categoriesById = new Map(categories.map((c) => [c.id, c]))
 
   const context = buildFinancialContext(accounts, categories, transactions, transfers, budgets, today)
-  const series = buildMonthlySeries(accounts, transactions, categoriesById, MONTHLY_SERIES_MONTHS_BACK, today)
+  const series = buildMonthlySeries(accounts, transactions, transfers, categoriesById, MONTHLY_SERIES_MONTHS_BACK, today)
 
   const sentences: string[] = []
 
