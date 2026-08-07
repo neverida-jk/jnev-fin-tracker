@@ -23,12 +23,16 @@ import {
   Bell,
   BellRing,
   BellOff,
+  FileSpreadsheet,
 } from 'lucide-react'
 import Card from '../components/Card'
 import PickerGrid, { type PickerItem } from '../components/PickerGrid'
 import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import { staggerContainer, fadeUpItem, tapScale } from '../lib/motion'
+import { disableLock, isCryptoSupported, isLockEnabled, setPin } from '../lib/appLock'
 import { exportBackup, importBackup } from '../lib/backup'
+import { buildTransactionsCsv } from '../lib/csvExport'
+import { todayISO } from '../lib/dates'
 import { listLocalSnapshots, restoreLocalSnapshot, MAX_SNAPSHOT_GENERATIONS } from '../lib/localSnapshot'
 import { detectNativeAi, generateWithLocalModel, isLocalModelEnabled, setLocalModelEnabled } from '../lib/aiEngine'
 import {
@@ -86,6 +90,7 @@ export default function Settings() {
     >
       <BackupSection />
       <AutoSnapshotsSection />
+      <AppLockSection />
       <CategoriesSection />
       <WordsSection />
       <StorageSection />
@@ -95,8 +100,21 @@ export default function Settings() {
   )
 }
 
+function downloadBlob(content: string, mimeType: string, filename: string) {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 function BackupSection() {
   const [exporting, setExporting] = useState(false)
+  const [exportingCsv, setExportingCsv] = useState(false)
   const [importing, setImporting] = useState(false)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [banner, setBanner] = useState<Banner>(null)
@@ -108,21 +126,35 @@ function BackupSection() {
     try {
       const backup = await exportBackup()
       const json = JSON.stringify(backup, null, 2)
-      const blob = new Blob([json], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const stamp = backup.exportedAt.replace(/[:.]/g, '-')
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `finance-tracker-backup-${stamp}.json`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      downloadBlob(json, 'application/json', `finance-tracker-backup-${backup.exportedAt.replace(/[:.]/g, '-')}.json`)
       setBanner({ kind: 'success', message: 'Backup downloaded.' })
     } catch (err) {
       setBanner({ kind: 'error', message: err instanceof Error ? err.message : 'Export failed.' })
     } finally {
       setExporting(false)
+    }
+  }
+
+  async function handleExportCsv() {
+    setBanner(null)
+    setExportingCsv(true)
+    try {
+      const [transactions, accounts, categories] = await Promise.all([
+        db.transactions.toArray(),
+        db.accounts.toArray(),
+        db.categories.toArray(),
+      ])
+      const csv = buildTransactionsCsv(
+        transactions,
+        new Map(accounts.map((a) => [a.id, a])),
+        new Map(categories.map((c) => [c.id, c])),
+      )
+      downloadBlob(csv, 'text/csv', `finance-tracker-transactions-${todayISO()}.csv`)
+      setBanner({ kind: 'success', message: 'Transactions CSV downloaded.' })
+    } catch (err) {
+      setBanner({ kind: 'error', message: err instanceof Error ? err.message : 'CSV export failed.' })
+    } finally {
+      setExportingCsv(false)
     }
   }
 
@@ -197,6 +229,21 @@ function BackupSection() {
           aria-label="Choose backup file to import"
         />
       </div>
+
+      <motion.button
+        {...tapScale}
+        type="button"
+        onClick={handleExportCsv}
+        disabled={exportingCsv}
+        className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+      >
+        {exportingCsv ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+        Export transactions as CSV
+      </motion.button>
+      <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+        For spreadsheets or records — not a restorable backup, and doesn't include transfers between
+        your own accounts.
+      </p>
 
       {pendingFile && (
         <motion.div
@@ -414,6 +461,205 @@ function AutoSnapshotsSection() {
           {banner.kind === 'success' ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
           {banner.message}
         </motion.p>
+      )}
+    </Card>
+  )
+}
+
+type AppLockMode = 'idle' | 'entering-new' | 'confirming' | 'confirming-disable'
+
+function AppLockSection() {
+  const [enabled, setEnabled] = useState(false)
+  const [supported, setSupported] = useState(true)
+  const [mode, setMode] = useState<AppLockMode>('idle')
+  const [draft, setDraft] = useState('')
+  const [firstPin, setFirstPin] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [banner, setBanner] = useState<Banner>(null)
+
+  useEffect(() => {
+    setSupported(isCryptoSupported())
+    setEnabled(isLockEnabled())
+  }, [])
+
+  function startSetPin() {
+    setDraft('')
+    setFirstPin('')
+    setError(null)
+    setBanner(null)
+    setMode('entering-new')
+  }
+
+  function cancel() {
+    setDraft('')
+    setFirstPin('')
+    setError(null)
+    setMode('idle')
+  }
+
+  function submitFirstPin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!/^\d{4,}$/.test(draft)) {
+      setError('Use at least 4 digits.')
+      return
+    }
+    setFirstPin(draft)
+    setDraft('')
+    setError(null)
+    setMode('confirming')
+  }
+
+  async function submitConfirmPin(e: React.FormEvent) {
+    e.preventDefault()
+    if (draft !== firstPin) {
+      setError('PINs did not match — try again.')
+      setDraft('')
+      setFirstPin('')
+      setMode('entering-new')
+      return
+    }
+    try {
+      await setPin(firstPin)
+      setEnabled(true)
+      cancel()
+      setBanner({ kind: 'success', message: 'App lock is on.' })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not set the PIN.')
+    }
+  }
+
+  function handleDisable() {
+    disableLock()
+    setEnabled(false)
+    setMode('idle')
+    setBanner({ kind: 'success', message: 'App lock turned off.' })
+  }
+
+  return (
+    <Card variants={fadeUpItem}>
+      <h2 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-300">App lock</h2>
+      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+        A PIN screen shown when you open the app or come back to it — a screen lock so a phone picked
+        up by someone else can't casually browse your accounts. It doesn't encrypt anything on this
+        device.
+      </p>
+
+      {!supported ? (
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          This browser doesn't support the app lock feature.
+        </p>
+      ) : mode === 'entering-new' || mode === 'confirming' ? (
+        <form onSubmit={mode === 'entering-new' ? submitFirstPin : submitConfirmPin} className="space-y-2">
+          <label htmlFor="app-lock-pin" className="sr-only">
+            {mode === 'entering-new' ? 'New PIN' : 'Confirm PIN'}
+          </label>
+          <input
+            id="app-lock-pin"
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            autoFocus
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value.replace(/\D/g, ''))
+              setError(null)
+            }}
+            placeholder={mode === 'entering-new' ? 'New PIN (4+ digits)' : 'Confirm PIN'}
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-center text-sm tracking-[0.4em] transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
+          />
+          {error && (
+            <p className="text-xs text-red-600 dark:text-red-400" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <motion.button
+              {...tapScale}
+              type="button"
+              onClick={cancel}
+              className="flex-1 rounded-xl bg-slate-100 py-2 text-xs font-medium dark:bg-slate-800"
+            >
+              Cancel
+            </motion.button>
+            <motion.button
+              {...tapScale}
+              type="submit"
+              className="flex-1 rounded-xl bg-linear-to-br from-brand-from to-brand-to py-2 text-xs font-semibold text-white"
+            >
+              {mode === 'entering-new' ? 'Next' : 'Confirm'}
+            </motion.button>
+          </div>
+        </form>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm">
+            {enabled ? (
+              <ShieldCheck size={18} className="shrink-0 text-green-600 dark:text-green-400" />
+            ) : (
+              <ShieldAlert size={18} className="shrink-0 text-slate-400 dark:text-slate-500" />
+            )}
+            <span className="text-slate-700 dark:text-slate-300">
+              {enabled ? 'App lock is on.' : 'App lock is off.'}
+            </span>
+          </div>
+
+          {mode === 'confirming-disable' ? (
+            <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-xs dark:border-red-800/60 dark:bg-red-950/40">
+              <p className="mb-2 text-red-700 dark:text-red-400">Turn off the app lock?</p>
+              <div className="flex gap-2">
+                <motion.button
+                  {...tapScale}
+                  type="button"
+                  onClick={() => setMode('idle')}
+                  className="flex-1 rounded-lg bg-white py-1.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  Cancel
+                </motion.button>
+                <motion.button
+                  {...tapScale}
+                  type="button"
+                  onClick={handleDisable}
+                  className="flex-1 rounded-lg bg-red-600 py-1.5 font-semibold text-white"
+                >
+                  Turn off
+                </motion.button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <motion.button
+                {...tapScale}
+                type="button"
+                onClick={startSetPin}
+                className="flex-1 rounded-xl border border-slate-300 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:text-slate-200"
+              >
+                {enabled ? 'Change PIN' : 'Set a PIN'}
+              </motion.button>
+              {enabled && (
+                <motion.button
+                  {...tapScale}
+                  type="button"
+                  onClick={() => setMode('confirming-disable')}
+                  className="flex-1 rounded-xl border border-slate-300 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:text-slate-200"
+                >
+                  Turn off lock
+                </motion.button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {banner && (
+        <p
+          className={`mt-3 flex items-center gap-1.5 text-xs ${
+            banner.kind === 'success' ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+          }`}
+          role="status"
+        >
+          {banner.kind === 'success' ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+          {banner.message}
+        </p>
       )}
     </Card>
   )

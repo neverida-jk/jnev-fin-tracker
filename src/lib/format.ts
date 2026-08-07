@@ -30,6 +30,14 @@ export function formatWeekLabel(weekKey: string): string {
   })
 }
 
+/** Time-of-day from a transaction/transfer's createdAt ISO timestamp — e.g.
+ * "3:45 PM". Every transaction/transfer already stores this; this just
+ * surfaces it next to the (day-only) date so multiple same-day entries are
+ * distinguishable. */
+export function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+}
+
 /** Full Mon-Sun span for a week-bucket key, e.g. "Mon Aug 3 - Sun Aug 9" —
  * spells out every day a "this week" figure covers, unlike formatWeekLabel's
  * single-date compactness for chart axis ticks. */

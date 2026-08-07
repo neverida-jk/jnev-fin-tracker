@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Search, X } from 'lucide-react'
 import db, { type Transaction } from '../db'
 import { signedAmount } from '../lib/finance'
-import { formatMoney } from '../lib/format'
+import { formatMoney, formatTime } from '../lib/format'
 import { parseISODate } from '../lib/dates'
 import Card from '../components/Card'
 import { staggerContainer, fadeUpItem } from '../lib/motion'
@@ -13,6 +13,7 @@ import { TransactionEditForm } from './Accounts'
 interface HistoryRow {
   id: string
   date: string
+  createdAt: string
   kind: 'transaction' | 'transfer'
   label: string
   accountLabel: string
@@ -55,6 +56,7 @@ export default function Transactions() {
       return {
         id: `t${t.id}`,
         date: t.date,
+        createdAt: t.createdAt,
         kind: 'transaction',
         label,
         accountLabel,
@@ -75,6 +77,7 @@ export default function Transactions() {
       const row: HistoryRow = {
         id: `x${tr.id}`,
         date: tr.date,
+        createdAt: tr.createdAt,
         kind: 'transfer',
         label,
         accountLabel,
@@ -216,7 +219,8 @@ export default function Transactions() {
                       )}
                       <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300">
                         <span className="text-slate-400 dark:text-slate-500">
-                          {parseISODate(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          {parseISODate(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })},{' '}
+                          {formatTime(r.createdAt)}
                         </span>{' '}
                         · {r.label}
                         <span className="block truncate text-xs text-slate-400 dark:text-slate-500">{r.accountLabel}</span>

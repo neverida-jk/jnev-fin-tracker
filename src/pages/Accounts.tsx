@@ -28,7 +28,7 @@ import db, {
   type Transfer,
 } from '../db'
 import { accountBalance, signedAmount } from '../lib/finance'
-import { formatMoney } from '../lib/format'
+import { formatMoney, formatTime } from '../lib/format'
 import { parseISODate, todayISO } from '../lib/dates'
 import { ACCOUNT_TYPES, ACCOUNT_ICONS } from '../lib/accountIcons'
 import Card from '../components/Card'
@@ -79,6 +79,7 @@ export default function Accounts() {
 interface HistoryEntry {
   id: string
   date: string
+  createdAt: string
   label: string
   signed: number
   kind: 'transaction' | 'transfer'
@@ -121,6 +122,7 @@ function AccountCard({
         return {
           id: `t${t.id}`,
           date: t.date,
+          createdAt: t.createdAt,
           label: `${category?.name ?? 'Unknown'}${t.note ? ` · ${t.note}` : ''}`,
           signed: category ? signedAmount(t.amount, category.kind) : t.amount,
           kind: 'transaction',
@@ -136,6 +138,7 @@ function AccountCard({
         return {
           id: `x${tr.id}`,
           date: tr.date,
+          createdAt: tr.createdAt,
           label: `${isOut ? 'Transfer to' : 'Transfer from'} ${otherName}${tr.note ? ` · ${tr.note}` : ''}`,
           signed: isOut ? -tr.amount : tr.amount,
           kind: 'transfer',
@@ -317,6 +320,7 @@ function AccountCard({
                               month: 'short',
                               day: 'numeric',
                             })}
+                            , {formatTime(h.createdAt)}
                           </span>{' '}
                           · {h.label}
                         </span>

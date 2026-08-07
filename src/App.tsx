@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence } from 'framer-motion'
@@ -7,7 +7,9 @@ import PageTransition from './components/PageTransition'
 import CommandBar from './components/CommandBar'
 import StatusStrip from './components/StatusStrip'
 import UpdateToast from './components/UpdateToast'
+import LockScreen from './components/LockScreen'
 import db, { seedIfEmpty } from './db'
+import { isLockEnabled } from './lib/appLock'
 import { shouldTakeSnapshotToday, takeLocalSnapshot } from './lib/localSnapshot'
 import { checkAndNotify } from './lib/notifications'
 
@@ -51,6 +53,21 @@ function RouteFallback() {
 function App() {
   const location = useLocation()
 
+  // Cold start begins locked whenever a PIN is set; re-locks immediately on
+  // every backgrounding (not after a grace period) — simpler than a timer,
+  // and matches how banking apps behave by default.
+  const [locked, setLocked] = useState(isLockEnabled)
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden' && isLockEnabled()) {
+        setLocked(true)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
+
   useEffect(() => {
     seedIfEmpty()
   }, [])
@@ -78,6 +95,10 @@ function App() {
       })
     }
   }, [])
+
+  if (locked) {
+    return <LockScreen onUnlock={() => setLocked(false)} />
+  }
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
