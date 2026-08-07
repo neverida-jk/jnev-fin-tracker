@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Sparkles, X, Check, Undo2, ArrowRight, Pencil, HelpCircle, AlertTriangle } from 'lucide-react'
@@ -102,6 +103,21 @@ export default function CommandBar() {
   const [result, setResult] = useState<ExecutionResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [fixing, setFixing] = useState<'account' | 'category' | null>(null)
+
+  // Opens automatically when launched from the "Quick command" home-screen
+  // shortcut (vite.config.ts's manifest), which links to /#/?command=1 since
+  // a PWA shortcut needs a URL to land on, not a button to press.
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    if (searchParams.get('command') === '1') {
+      setOpen(true)
+      setSearchParams((prev) => {
+        prev.delete('command')
+        return prev
+      }, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Pre-execution confidence gate: fuzzy-matched fields on the *current*
   // parsed command that the user has already confirmed or corrected, and any

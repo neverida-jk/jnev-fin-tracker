@@ -55,6 +55,24 @@ export default defineConfig({
             purpose: 'maskable',
           },
         ],
+        // Long-press the installed app icon for these — most home screens
+        // show 2-4. "Quick command" links to a URL (not a button) since
+        // that's all a launcher shortcut can target; CommandBar.tsx opens
+        // itself on seeing ?command=1 and immediately strips it from the URL.
+        shortcuts: [
+          {
+            name: 'Add transaction',
+            short_name: 'Add',
+            url: '/#/add',
+            icons: [{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+          },
+          {
+            name: 'Quick command',
+            short_name: 'Command',
+            url: '/#/?command=1',
+            icons: [{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+          },
+        ],
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],

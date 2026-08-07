@@ -4,8 +4,14 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Plus, Trash2, Check, ChevronLeft, AlertTriangle } from 'lucide-react'
 import db, { type BillFrequency, type RecurringBill } from '../db'
 import { formatMoney } from '../lib/format'
-import { currentMonthKey, todayISO } from '../lib/dates'
+import { currentMonthKey, parseISODate, todayISO } from '../lib/dates'
 import { getBillsThisMonth } from '../lib/bills'
+import {
+  detectSubscriptionCandidates,
+  dismissSubscriptionCandidate,
+  isSubscriptionCandidateDismissed,
+  type SubscriptionCandidate,
+} from '../lib/subscriptionDetection'
 import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import Card from '../components/Card'
 import PayoutDatesManager from '../components/PayoutDatesManager'
@@ -18,8 +24,99 @@ export default function Bills() {
   return (
     <div className="mx-4 mt-4 space-y-8 pb-6">
       <RecurringBills />
+      <SubscriptionSuggestions />
       <PayoutSchedules />
     </div>
+  )
+}
+
+function SubscriptionSuggestions() {
+  const transactions = useLiveQuery(() => db.transactions.toArray(), [], [])
+  const categories = useLiveQuery(() => db.categories.toArray(), [], [])
+  const bills = useLiveQuery(() => db.recurringBills.toArray(), [], [])
+  const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
+  const categoriesById = new Map((categories ?? []).map((c) => [c.id, c]))
+  const accountsById = new Map((accounts ?? []).map((a) => [a.id, a]))
+
+  // localStorage-backed dismissal isn't itself reactive — this just forces a
+  // re-render after dismiss()/trackAsBill() so the filtered list updates.
+  const [, forceRerender] = useState(0)
+
+  const candidates = detectSubscriptionCandidates(transactions ?? [], categories ?? [], bills ?? []).filter(
+    (c) => !isSubscriptionCandidateDismissed(c.key),
+  )
+
+  async function trackAsBill(candidate: SubscriptionCandidate) {
+    const lastDate = candidate.occurrences[candidate.occurrences.length - 1]
+    await db.recurringBills.add({
+      id: undefined as unknown as number,
+      name: categoriesById.get(candidate.categoryId)?.name ?? 'Subscription',
+      amount: candidate.amount,
+      frequency: 'monthly',
+      dueDay: parseISODate(lastDate).getDate(),
+      accountId: candidate.accountId,
+      categoryId: candidate.categoryId,
+      active: true,
+    })
+    dismissSubscriptionCandidate(candidate.key)
+    forceRerender((n) => n + 1)
+  }
+
+  function dismiss(key: string) {
+    dismissSubscriptionCandidate(key)
+    forceRerender((n) => n + 1)
+  }
+
+  if (candidates.length === 0) return null
+
+  return (
+    <section>
+      <h2 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-300">Possible subscriptions</h2>
+      <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+        Charges that repeat monthly at the same amount but aren't tracked as a bill yet.
+      </p>
+      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-2">
+        <AnimatePresence initial={false}>
+          {candidates.map((c) => (
+            <Card
+              key={c.key}
+              layout
+              variants={fadeUpItem}
+              exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+              className="!p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-slate-800 dark:text-slate-200">
+                    {categoriesById.get(c.categoryId)?.name ?? 'Unknown'}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {formatMoney(c.amount)} · seen {c.occurrences.length}x · {accountsById.get(c.accountId)?.name}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => dismiss(c.key)}
+                    className="rounded-lg px-2 py-1 text-xs text-slate-500 dark:text-slate-400"
+                  >
+                    Dismiss
+                  </button>
+                  <motion.button
+                    {...tapScale}
+                    type="button"
+                    onClick={() => trackAsBill(c)}
+                    className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white"
+                  >
+                    Track as bill
+                  </motion.button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </AnimatePresence>
+      </motion.div>
+    </section>
   )
 }
 
