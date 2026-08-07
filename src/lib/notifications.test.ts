@@ -57,7 +57,7 @@ function installServiceWorker() {
 }
 
 function bill(overrides: Partial<RecurringBill> = {}): RecurringBill {
-  return { id: 1, name: 'Rent', amount: 8000, dueDay: 15, accountId: 1, categoryId: 1, active: true, ...overrides }
+  return { id: 1, name: 'Rent', amount: 8000, frequency: 'monthly', dueDay: 15, accountId: 1, categoryId: 1, active: true, ...overrides }
 }
 
 function schedule(overrides: Partial<PayoutSchedule> = {}): PayoutSchedule {

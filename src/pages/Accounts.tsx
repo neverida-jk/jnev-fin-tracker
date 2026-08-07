@@ -144,7 +144,9 @@ function AccountCard({
           kind: 'transfer',
         }
       }),
-  ].sort((a, b) => b.date.localeCompare(a.date))
+  // createdAt breaks ties within the same day, so the most recently logged
+  // entry is always on top rather than whatever order it happened to be in.
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
 
   function startRename() {
     setRenameValue(account.name)

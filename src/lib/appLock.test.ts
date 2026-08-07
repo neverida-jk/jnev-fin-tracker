@@ -56,15 +56,19 @@ describe('isLockEnabled', () => {
 
 describe('setPin', () => {
   it('rejects a PIN shorter than 4 digits', async () => {
-    await expect(setPin('123')).rejects.toThrow('Use at least 4 digits.')
+    await expect(setPin('123')).rejects.toThrow('Use exactly 4 digits.')
     expect(isLockEnabled()).toBe(false)
   })
 
-  it('rejects a non-numeric PIN', async () => {
-    await expect(setPin('12ab')).rejects.toThrow('Use at least 4 digits.')
+  it('rejects a PIN longer than 4 digits', async () => {
+    await expect(setPin('123456')).rejects.toThrow('Use exactly 4 digits.')
   })
 
-  it('accepts a 4+ digit numeric PIN', async () => {
+  it('rejects a non-numeric PIN', async () => {
+    await expect(setPin('12ab')).rejects.toThrow('Use exactly 4 digits.')
+  })
+
+  it('accepts a 4-digit numeric PIN', async () => {
     await expect(setPin('4242')).resolves.toBeUndefined()
     expect(isLockEnabled()).toBe(true)
   })

@@ -354,7 +354,7 @@ describe('parseCommand — editTransaction', () => {
 
 describe('parseCommand — deleteBill', () => {
   const recurringBills: RecurringBill[] = [
-    { id: 1, name: 'Netflix', amount: 149, dueDay: 15, accountId: GCASH, categoryId: SUBSCRIPTIONS, active: true },
+    { id: 1, name: 'Netflix', amount: 149, frequency: 'monthly', dueDay: 15, accountId: GCASH, categoryId: SUBSCRIPTIONS, active: true },
   ]
 
   it('resolves a bill to delete by name', () => {

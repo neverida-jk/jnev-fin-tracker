@@ -11,6 +11,7 @@ function bill(overrides: Partial<RecurringBill> = {}): RecurringBill {
     id: 1,
     name: 'Rent',
     amount: 8000,
+    frequency: 'monthly',
     dueDay: 1,
     accountId: 1,
     categoryId: 1,
@@ -87,6 +88,31 @@ describe('getBillsThisMonth', () => {
       'DueToday',
       'NotDueYet',
     ])
+  })
+})
+
+describe('getBillsThisMonth (one-time bills)', () => {
+  it('uses the specific dueDate instead of a monthly dueDay', () => {
+    const result = getBillsThisMonth(
+      [bill({ frequency: 'once', dueDate: '2026-02-20', dueDay: 1 })],
+      FEB_15_2026,
+    )
+    expect(result[0].dueDate).toEqual(new Date(2026, 1, 20))
+  })
+
+  it('is paid once `paid` is true, with no monthly reset', () => {
+    const paid = getBillsThisMonth([bill({ frequency: 'once', dueDate: '2026-02-01', paid: true })], FEB_15_2026)
+    expect(paid[0].paidThisMonth).toBe(true)
+    expect(paid[0].overdue).toBe(false)
+
+    const unpaid = getBillsThisMonth([bill({ frequency: 'once', dueDate: '2026-02-01', paid: false })], FEB_15_2026)
+    expect(unpaid[0].paidThisMonth).toBe(false)
+    expect(unpaid[0].overdue).toBe(true) // past due (Feb 1) and unpaid
+  })
+
+  it('is not overdue when its due date has not arrived yet', () => {
+    const result = getBillsThisMonth([bill({ frequency: 'once', dueDate: '2026-02-28' })], FEB_15_2026)
+    expect(result[0].overdue).toBe(false)
   })
 })
 

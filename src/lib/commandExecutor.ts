@@ -172,6 +172,7 @@ export async function executeCommand(cmd: ParsedCommand): Promise<ExecutionResul
         id: undefined as unknown as number,
         name: cmd.billName,
         amount: cmd.amount,
+        frequency: 'monthly',
         dueDay: cmd.dueDay ?? 1,
         accountId: cmd.accountId,
         categoryId: cmd.categoryId,

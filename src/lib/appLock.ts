@@ -8,6 +8,11 @@
 
 const PIN_HASH_KEY = 'app-lock-pin-hash'
 
+/** Fixed PIN length — kept short since this is a screen lock checked on
+ * every digit typed (auto-submits, no separate unlock button), not a
+ * strength-hardened credential (see the module note above). */
+export const PIN_LENGTH = 4
+
 export function isCryptoSupported(): boolean {
   return typeof crypto !== 'undefined' && !!crypto.subtle
 }
@@ -28,15 +33,15 @@ async function hashPin(pin: string): Promise<string> {
     .join('')
 }
 
-/** Sets (or replaces) the app lock PIN. Requires at least 4 digits — not for
- * strength against a determined attacker (see the note above), just enough
- * to not be a trivial 1-2 digit guess. */
+/** Sets (or replaces) the app lock PIN. Must be exactly PIN_LENGTH digits —
+ * fixed length is what lets the entry screens auto-submit on the last
+ * digit instead of needing a separate unlock button. */
 export async function setPin(pin: string): Promise<void> {
   if (!isCryptoSupported()) {
     throw new Error('This browser does not support the app lock feature.')
   }
-  if (!/^\d{4,}$/.test(pin)) {
-    throw new Error('Use at least 4 digits.')
+  if (!new RegExp(`^\\d{${PIN_LENGTH}}$`).test(pin)) {
+    throw new Error(`Use exactly ${PIN_LENGTH} digits.`)
   }
   localStorage.setItem(PIN_HASH_KEY, await hashPin(pin))
 }

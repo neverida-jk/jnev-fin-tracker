@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Search, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react'
 import db, { type Transaction } from '../db'
 import { signedAmount } from '../lib/finance'
 import { formatMoney, formatTime } from '../lib/format'
@@ -9,6 +9,8 @@ import { parseISODate } from '../lib/dates'
 import Card from '../components/Card'
 import { staggerContainer, fadeUpItem } from '../lib/motion'
 import { TransactionEditForm } from './Accounts'
+
+const PAGE_SIZE = 20
 
 interface HistoryRow {
   id: string
@@ -46,6 +48,7 @@ export default function Transactions() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [editingTxId, setEditingTxId] = useState<number | null>(null)
+  const [page, setPage] = useState(0)
 
   const rows: HistoryRow[] = [
     ...(transactions ?? []).map((t): HistoryRow => {
@@ -88,7 +91,10 @@ export default function Transactions() {
       }
       return row
     }),
-  ].sort((a, b) => b.date.localeCompare(a.date))
+  // Same-day entries share a `date` string, so that alone can't order them —
+  // createdAt (the actual logged time) breaks the tie, so the most recently
+  // added entry is always on top, not whatever order it happened to be in.
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
 
   const filtered = rows.filter((r) => {
     if (categoryFilter !== null && r.categoryId !== categoryFilter) return false
@@ -101,6 +107,14 @@ export default function Transactions() {
 
   const totalSpent = filtered.filter((r) => r.signed < 0).reduce((sum, r) => sum + Math.abs(r.signed), 0)
   const hasActiveFilter = query.trim() !== '' || categoryFilter !== null || accountFilter !== null || fromDate !== '' || toDate !== ''
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages - 1)
+  const pageRows = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)
+
+  useEffect(() => {
+    setPage(0)
+  }, [query, categoryFilter, accountFilter, fromDate, toDate])
 
   const expenseCategories = (categories ?? []).filter((c) => c.kind === 'expense' && !c.archived)
   const incomeCategories = (categories ?? []).filter((c) => c.kind === 'income' && !c.archived)
@@ -190,7 +204,7 @@ export default function Transactions() {
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             <AnimatePresence initial={false}>
-              {filtered.map((r) => (
+              {pageRows.map((r) => (
                 <motion.li
                   key={r.id}
                   layout
@@ -249,6 +263,30 @@ export default function Transactions() {
           </ul>
         )}
       </Card>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-1">
+          <button
+            type="button"
+            onClick={() => setPage(currentPage - 1)}
+            disabled={currentPage === 0}
+            className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 disabled:opacity-30 dark:text-slate-300"
+          >
+            <ChevronLeft size={14} /> Prev
+          </button>
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            Page {currentPage + 1} of {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage(currentPage + 1)}
+            disabled={currentPage >= totalPages - 1}
+            className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-600 disabled:opacity-30 dark:text-slate-300"
+          >
+            Next <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
     </motion.div>
   )
 }

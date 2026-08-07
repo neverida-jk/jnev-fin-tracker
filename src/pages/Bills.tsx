@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Plus, Trash2, Check, ChevronLeft, AlertTriangle } from 'lucide-react'
-import db from '../db'
+import db, { type BillFrequency, type RecurringBill } from '../db'
 import { formatMoney } from '../lib/format'
-import { currentMonthKey } from '../lib/dates'
+import { currentMonthKey, todayISO } from '../lib/dates'
 import { getBillsThisMonth } from '../lib/bills'
 import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import Card from '../components/Card'
@@ -17,8 +17,8 @@ import { staggerContainer, fadeUpItem, tapScale } from '../lib/motion'
 export default function Bills() {
   return (
     <div className="mx-4 mt-4 space-y-8 pb-6">
-      <PayoutSchedules />
       <RecurringBills />
+      <PayoutSchedules />
     </div>
   )
 }
@@ -281,18 +281,21 @@ function RecurringBills() {
   const categoriesById = new Map((categories ?? []).map((c) => [c.id, c]))
   const expenseCategories = (categories ?? []).filter((c) => c.kind === 'expense')
 
-  async function markPaid(billId: number, accountIdForTx: number, categoryIdForTx: number, billAmount: number) {
-    const monthKey = currentMonthKey()
+  async function markPaid(bill: RecurringBill) {
     await db.transactions.add({
       id: undefined as unknown as number,
-      accountId: accountIdForTx,
-      categoryId: categoryIdForTx,
-      amount: billAmount,
+      accountId: bill.accountId,
+      categoryId: bill.categoryId,
+      amount: bill.amount,
       date: new Date().toISOString().slice(0, 10),
       note: 'Bill payment',
       createdAt: new Date().toISOString(),
     })
-    await db.recurringBills.update(billId, { lastPaidMonth: monthKey })
+    if (bill.frequency === 'once') {
+      await db.recurringBills.update(bill.id, { paid: true })
+    } else {
+      await db.recurringBills.update(bill.id, { lastPaidMonth: currentMonthKey() })
+    }
   }
 
   async function removeBill(id: number) {
@@ -335,6 +338,7 @@ function RecurringBills() {
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 {formatMoney(bill.amount)} · due{' '}
                 {dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                {bill.frequency === 'once' && ' · one-time'}
               </p>
               {overdue && (
                 <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
@@ -353,7 +357,7 @@ function RecurringBills() {
                       animate={{ opacity: 1, scale: 1 }}
                       className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400"
                     >
-                      <Check size={14} /> Paid this month
+                      <Check size={14} /> {bill.frequency === 'once' ? 'Paid' : 'Paid this month'}
                     </motion.span>
                   ) : (
                     <motion.button
@@ -361,7 +365,7 @@ function RecurringBills() {
                       {...tapScale}
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
-                      onClick={() => markPaid(bill.id, bill.accountId, bill.categoryId, bill.amount)}
+                      onClick={() => markPaid(bill)}
                       className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
                     >
                       Mark paid
@@ -389,9 +393,11 @@ function AddRecurringBillFlow({
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState(0)
   const [direction, setDirection] = useState(1)
+  const [frequency, setFrequency] = useState<BillFrequency>('monthly')
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
   const [dueDay, setDueDay] = useState('1')
+  const [dueDate, setDueDate] = useState(todayISO())
   const [accountId, setAccountId] = useState<number | ''>('')
   const [categoryId, setCategoryId] = useState<number | ''>('')
   const [saved, setSaved] = useState(false)
@@ -399,9 +405,11 @@ function AddRecurringBillFlow({
   function openFlow() {
     setStep(0)
     setDirection(1)
+    setFrequency('monthly')
     setName('')
     setAmount('')
     setDueDay('1')
+    setDueDate(todayISO())
     setAccountId('')
     setCategoryId('')
     setSaved(false)
@@ -423,7 +431,9 @@ function AddRecurringBillFlow({
       id: undefined as unknown as number,
       name: name.trim(),
       amount: Number(amount),
+      frequency,
       dueDay: Math.min(31, Math.max(1, Number(dueDay) || 1)),
+      dueDate: frequency === 'once' ? dueDate : undefined,
       accountId,
       categoryId,
       active: true,
@@ -463,10 +473,35 @@ function AddRecurringBillFlow({
                 Cancel
               </button>
             </div>
-            <StepDots total={5} current={step} />
+            <StepDots total={6} current={step} />
 
             <AnimatePresence mode="wait" custom={direction}>
               {step === 0 && (
+                <FlowStep key="frequency" direction={direction}>
+                  <div className="space-y-3">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">
+                      Recurring or one-time?
+                    </label>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {(['monthly', 'once'] as BillFrequency[]).map((f) => (
+                        <motion.button
+                          key={f}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => {
+                            setFrequency(f)
+                            goNext()
+                          }}
+                          className="flex flex-col items-center gap-1 rounded-xl border border-slate-200/80 bg-white py-4 text-sm font-medium text-slate-700 shadow-sm shadow-slate-900/5 transition-colors hover:border-indigo-200 hover:bg-indigo-50/60 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300 dark:hover:border-indigo-800 dark:hover:bg-indigo-950/40"
+                        >
+                          {f === 'monthly' ? 'Recurring' : 'One-time'}
+                        </motion.button>
+                      ))}
+                    </div>
+                  </div>
+                </FlowStep>
+              )}
+
+              {step === 1 && (
                 <FlowStep key="name" direction={direction}>
                   <div className="space-y-3">
                     <input
@@ -500,7 +535,7 @@ function AddRecurringBillFlow({
                 </FlowStep>
               )}
 
-              {step === 1 && (
+              {step === 2 && frequency === 'monthly' && (
                 <FlowStep key="dueday" direction={direction}>
                   <div className="space-y-3">
                     <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">
@@ -527,7 +562,30 @@ function AddRecurringBillFlow({
                 </FlowStep>
               )}
 
-              {step === 2 && (
+              {step === 2 && frequency === 'once' && (
+                <FlowStep key="duedate" direction={direction}>
+                  <div className="space-y-3">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">Due date</label>
+                    <input
+                      type="date"
+                      autoFocus
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-lg transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
+                    />
+                    <motion.button
+                      {...tapScale}
+                      type="button"
+                      onClick={goNext}
+                      className="w-full rounded-xl bg-linear-to-br from-brand-from to-brand-to py-3 font-medium text-white shadow-md shadow-violet-900/30"
+                    >
+                      Next
+                    </motion.button>
+                  </div>
+                </FlowStep>
+              )}
+
+              {step === 3 && (
                 <FlowStep key="account" direction={direction}>
                   <PickerGrid
                     title="Pay from account"
@@ -540,7 +598,7 @@ function AddRecurringBillFlow({
                 </FlowStep>
               )}
 
-              {step === 3 && (
+              {step === 4 && (
                 <FlowStep key="category" direction={direction}>
                   <PickerGrid
                     title="Category"
@@ -553,13 +611,14 @@ function AddRecurringBillFlow({
                 </FlowStep>
               )}
 
-              {step === 4 && (
+              {step === 5 && (
                 <FlowStep key="confirm" direction={direction}>
                   <div className="space-y-3">
                     <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800/60">
                       <p className="font-medium text-slate-800 dark:text-slate-200">{name}</p>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {formatMoney(Number(amount) || 0)} · due day {dueDay} · {account?.name} ·{' '}
+                        {formatMoney(Number(amount) || 0)} ·{' '}
+                        {frequency === 'monthly' ? `due day ${dueDay}` : `due ${dueDate}`} · {account?.name} ·{' '}
                         {category?.name}
                       </p>
                     </div>
@@ -582,7 +641,7 @@ function AddRecurringBillFlow({
                           </motion.span>
                         ) : (
                           <motion.span key="save" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                            Add recurring bill
+                            Add bill
                           </motion.span>
                         )}
                       </AnimatePresence>
@@ -594,7 +653,7 @@ function AddRecurringBillFlow({
           </motion.div>
         ) : (
           <motion.button key="cta" {...tapScale} onClick={openFlow} className="flex w-full items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-            <Plus size={16} /> Add recurring bill
+            <Plus size={16} /> Add bill
           </motion.button>
         )}
       </AnimatePresence>

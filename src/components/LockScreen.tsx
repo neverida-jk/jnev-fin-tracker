@@ -1,27 +1,35 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
 import { Lock } from 'lucide-react'
-import { disableLock, verifyPin } from '../lib/appLock'
-import { tapScale } from '../lib/motion'
+import { disableLock, PIN_LENGTH, verifyPin } from '../lib/appLock'
 
 /** Full-screen gate shown on cold start (if a PIN is set) and again every
  * time the app is backgrounded — see App.tsx's visibilitychange handler.
- * "Forgot PIN?" is a real, no-questions-asked reset because this is a
- * screen lock, not encryption (see appLock.ts) — turning it off can't lose
- * any financial data. */
+ * Checks automatically the instant PIN_LENGTH digits are entered — no
+ * separate unlock button. "Forgot PIN?" is a real, no-questions-asked reset
+ * because this is a screen lock, not encryption (see appLock.ts) — turning
+ * it off can't lose any financial data. */
 export default function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
   const [confirmingReset, setConfirmingReset] = useState(false)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (await verifyPin(pin)) {
-      onUnlock()
-    } else {
+  function handlePinChange(raw: string) {
+    const next = raw.replace(/\D/g, '').slice(0, PIN_LENGTH)
+    setPin(next)
+    setError(null)
+    if (next.length < PIN_LENGTH) return
+
+    setChecking(true)
+    verifyPin(next).then((ok) => {
+      if (ok) {
+        onUnlock()
+        return
+      }
       setError('Incorrect PIN.')
       setPin('')
-    }
+      setChecking(false)
+    })
   }
 
   function handleForgot() {
@@ -39,7 +47,7 @@ export default function LockScreen({ onUnlock }: { onUnlock: () => void }) {
         <p className="mt-1 text-sm text-slate-400">Unlock to see your accounts</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="w-full max-w-xs space-y-3">
+      <div className="w-full max-w-xs space-y-3">
         <label htmlFor="lock-pin" className="sr-only">
           PIN
         </label>
@@ -48,28 +56,19 @@ export default function LockScreen({ onUnlock }: { onUnlock: () => void }) {
           type="password"
           inputMode="numeric"
           pattern="[0-9]*"
+          maxLength={PIN_LENGTH}
           autoFocus
+          disabled={checking}
           value={pin}
-          onChange={(e) => {
-            setPin(e.target.value.replace(/\D/g, ''))
-            setError(null)
-          }}
-          className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-center text-lg tracking-[0.5em] text-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+          onChange={(e) => handlePinChange(e.target.value)}
+          className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-center text-lg tracking-[0.5em] text-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 disabled:opacity-60"
         />
         {error && (
           <p className="text-sm text-red-400" role="alert">
             {error}
           </p>
         )}
-        <motion.button
-          {...tapScale}
-          type="submit"
-          disabled={pin.length < 4}
-          className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold disabled:opacity-40"
-        >
-          Unlock
-        </motion.button>
-      </form>
+      </div>
 
       {!confirmingReset ? (
         <button

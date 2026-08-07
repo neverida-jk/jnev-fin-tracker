@@ -29,7 +29,7 @@ import Card from '../components/Card'
 import PickerGrid, { type PickerItem } from '../components/PickerGrid'
 import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import { staggerContainer, fadeUpItem, tapScale } from '../lib/motion'
-import { disableLock, isCryptoSupported, isLockEnabled, setPin } from '../lib/appLock'
+import { disableLock, isCryptoSupported, isLockEnabled, PIN_LENGTH, setPin } from '../lib/appLock'
 import { exportBackup, importBackup } from '../lib/backup'
 import { buildTransactionsCsv } from '../lib/csvExport'
 import { todayISO } from '../lib/dates'
@@ -497,35 +497,36 @@ function AppLockSection() {
     setMode('idle')
   }
 
-  function submitFirstPin(e: React.FormEvent) {
-    e.preventDefault()
-    if (!/^\d{4,}$/.test(draft)) {
-      setError('Use at least 4 digits.')
+  function handleDraftChange(raw: string) {
+    const next = raw.replace(/\D/g, '').slice(0, PIN_LENGTH)
+    setDraft(next)
+    setError(null)
+    if (next.length < PIN_LENGTH) return
+
+    if (mode === 'entering-new') {
+      setFirstPin(next)
+      setDraft('')
+      setMode('confirming')
       return
     }
-    setFirstPin(draft)
-    setDraft('')
-    setError(null)
-    setMode('confirming')
-  }
 
-  async function submitConfirmPin(e: React.FormEvent) {
-    e.preventDefault()
-    if (draft !== firstPin) {
+    if (next !== firstPin) {
       setError('PINs did not match — try again.')
       setDraft('')
       setFirstPin('')
       setMode('entering-new')
       return
     }
-    try {
-      await setPin(firstPin)
-      setEnabled(true)
-      cancel()
-      setBanner({ kind: 'success', message: 'App lock is on.' })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not set the PIN.')
-    }
+    setPin(firstPin)
+      .then(() => {
+        setEnabled(true)
+        cancel()
+        setBanner({ kind: 'success', message: 'App lock is on.' })
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Could not set the PIN.')
+        setDraft('')
+      })
   }
 
   function handleDisable() {
@@ -549,7 +550,7 @@ function AppLockSection() {
           This browser doesn't support the app lock feature.
         </p>
       ) : mode === 'entering-new' || mode === 'confirming' ? (
-        <form onSubmit={mode === 'entering-new' ? submitFirstPin : submitConfirmPin} className="space-y-2">
+        <div className="space-y-2">
           <label htmlFor="app-lock-pin" className="sr-only">
             {mode === 'entering-new' ? 'New PIN' : 'Confirm PIN'}
           </label>
@@ -558,13 +559,11 @@ function AppLockSection() {
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
+            maxLength={PIN_LENGTH}
             autoFocus
             value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value.replace(/\D/g, ''))
-              setError(null)
-            }}
-            placeholder={mode === 'entering-new' ? 'New PIN (4+ digits)' : 'Confirm PIN'}
+            onChange={(e) => handleDraftChange(e.target.value)}
+            placeholder={mode === 'entering-new' ? `New PIN (${PIN_LENGTH} digits)` : 'Confirm PIN'}
             className="w-full rounded-xl border border-slate-300 px-3 py-2 text-center text-sm tracking-[0.4em] transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
           />
           {error && (
@@ -572,24 +571,15 @@ function AppLockSection() {
               {error}
             </p>
           )}
-          <div className="flex gap-2">
-            <motion.button
-              {...tapScale}
-              type="button"
-              onClick={cancel}
-              className="flex-1 rounded-xl bg-slate-100 py-2 text-xs font-medium dark:bg-slate-800"
-            >
-              Cancel
-            </motion.button>
-            <motion.button
-              {...tapScale}
-              type="submit"
-              className="flex-1 rounded-xl bg-linear-to-br from-brand-from to-brand-to py-2 text-xs font-semibold text-white"
-            >
-              {mode === 'entering-new' ? 'Next' : 'Confirm'}
-            </motion.button>
-          </div>
-        </form>
+          <motion.button
+            {...tapScale}
+            type="button"
+            onClick={cancel}
+            className="w-full rounded-xl bg-slate-100 py-2 text-xs font-medium dark:bg-slate-800"
+          >
+            Cancel
+          </motion.button>
+        </div>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-sm">

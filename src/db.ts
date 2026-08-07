@@ -43,15 +43,20 @@ export interface Budget {
   limit: number
 }
 
+export type BillFrequency = 'monthly' | 'once'
+
 export interface RecurringBill {
   id: number
   name: string
   amount: number
-  dueDay: number // 1-31, clamped to last day of shorter months
+  frequency: BillFrequency
+  dueDay: number // meaningful when frequency === 'monthly': 1-31, clamped to last day of shorter months
+  dueDate?: string // meaningful when frequency === 'once': ISO yyyy-MM-dd
   accountId: number
   categoryId: number
   active: boolean
-  lastPaidMonth?: string // 'yyyy-MM'
+  lastPaidMonth?: string // 'yyyy-MM' — monthly bills only
+  paid?: boolean // one-time bills only: set once paid, never resets
 }
 
 // A payout schedule is just the "who/where" (which account and category this
@@ -243,6 +248,31 @@ db.version(8)
       .toCollection()
       .modify((category) => {
         category.isNeed = LEGACY_NEEDS_NAMES.has(category.name)
+      })
+  })
+
+// Bills gain a frequency ('monthly' | 'once') — every bill created before
+// this version was implicitly monthly (recurring by dueDay was the only
+// option), so the upgrade just makes that explicit.
+db.version(9)
+  .stores({
+    accounts: '++id, name, type',
+    categories: '++id, name, kind, archived',
+    transactions: '++id, accountId, categoryId, date, payoutDateId',
+    budgets: '++id, categoryId, period',
+    recurringBills: '++id, dueDay, active',
+    payoutSchedules: '++id, active',
+    payoutDates: '++id, scheduleId, date',
+    transfers: '++id, fromAccountId, toAccountId, date',
+    commandAliases: '++id, phrase, entityType',
+    localSnapshots: '++id, createdAt',
+  })
+  .upgrade(async (tx) => {
+    await tx
+      .table('recurringBills')
+      .toCollection()
+      .modify((bill) => {
+        bill.frequency = 'monthly'
       })
   })
 
