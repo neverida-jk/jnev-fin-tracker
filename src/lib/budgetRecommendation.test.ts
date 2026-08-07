@@ -17,8 +17,8 @@ afterEach(() => {
   generateNarrativeMock.mockReset()
 })
 
-const groceries: Category = { id: 1, name: 'Groceries', kind: 'expense', color: '#f97316' } // a NEEDS_CATEGORIES member
-const dining: Category = { id: 2, name: 'Dining', kind: 'expense', color: '#ec4899' } // not in NEEDS_CATEGORIES -> "wants"
+const groceries: Category = { id: 1, name: 'Groceries', kind: 'expense', color: '#f97316', isNeed: true }
+const dining: Category = { id: 2, name: 'Dining', kind: 'expense', color: '#ec4899', isNeed: false }
 
 function tx(overrides: Partial<Transaction> = {}): Transaction {
   return {
@@ -90,14 +90,14 @@ describe('computeBudgetRecommendationFallback', () => {
     expect(result.reasonFallback).not.toContain('₱')
   })
 
-  it('no history: needs category (e.g. Groceries) references the 50% needs guideline', () => {
+  it('no history: a category marked isNeed references the 50% needs guideline', () => {
     const result = computeBudgetRecommendationFallback(groceries, [], new Date(2026, 6, 10))
     expect(result.suggestedAmount).toBeNull()
     expect(result.reasonFallback).toContain('50%')
     expect(result.reasonFallback).toContain('needs')
   })
 
-  it('no history: a category outside NEEDS_CATEGORIES (Dining) references the 30% wants guideline, not needs', () => {
+  it('no history: a category not marked isNeed (Dining) references the 30% wants guideline, not needs', () => {
     const result = computeBudgetRecommendationFallback(dining, [], new Date(2026, 6, 10))
     expect(result.suggestedAmount).toBeNull()
     expect(result.reasonFallback).toContain('30%')

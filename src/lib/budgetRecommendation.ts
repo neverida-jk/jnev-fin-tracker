@@ -2,7 +2,7 @@ import type { Category, Transaction } from '../db'
 import { averageMonthlySpend } from './finance'
 import { currentMonthKey } from './dates'
 import { formatMoney } from './format'
-import { BUDGET_RULE_50_30_20, NEEDS_CATEGORIES } from './financialKnowledge'
+import { BUDGET_RULE_50_30_20 } from './financialKnowledge'
 import { generateNarrative, type AiTier } from './aiEngine'
 
 export interface BudgetRecommendation {
@@ -54,7 +54,7 @@ export function computeBudgetRecommendationFallback(
     }
   }
 
-  const isNeeds = NEEDS_CATEGORIES.has(category.name)
+  const isNeeds = category.isNeed ?? false
   const fractionPct = Math.round((isNeeds ? BUDGET_RULE_50_30_20.needs : BUDGET_RULE_50_30_20.wants) * 100)
   const kindLabel = isNeeds ? 'needs' : 'wants'
   return {

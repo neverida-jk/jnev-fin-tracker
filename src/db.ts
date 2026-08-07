@@ -18,6 +18,7 @@ export interface Category {
   color: string
   system?: boolean // hidden from normal category pickers (e.g. balance adjustments)
   archived?: boolean // retired by the user; kept so existing transactions/budgets still resolve, but excluded from normal pickers going forward
+  isNeed?: boolean // expense-only: true = "need" in the 50/30/20 split, false/unset = "want". User-set, not inferred from the name.
 }
 
 export interface Transaction {
@@ -215,6 +216,34 @@ db.version(7)
       })
   })
 
+// Needs/wants classification moves from a hardcoded category-name list
+// (which broke as soon as categories became renameable) to a real field on
+// the row. One-time seed carries the old list's verdict forward for existing
+// categories; every category created after this version defaults to "want"
+// until the user says otherwise.
+const LEGACY_NEEDS_NAMES = new Set(['Rent', 'Utilities', 'Groceries', 'Transport'])
+db.version(8)
+  .stores({
+    accounts: '++id, name, type',
+    categories: '++id, name, kind, archived',
+    transactions: '++id, accountId, categoryId, date, payoutDateId',
+    budgets: '++id, categoryId, period',
+    recurringBills: '++id, dueDay, active',
+    payoutSchedules: '++id, active',
+    payoutDates: '++id, scheduleId, date',
+    transfers: '++id, fromAccountId, toAccountId, date',
+    commandAliases: '++id, phrase, entityType',
+    localSnapshots: '++id, createdAt',
+  })
+  .upgrade(async (tx) => {
+    await tx
+      .table('categories')
+      .toCollection()
+      .modify((category) => {
+        category.isNeed = LEGACY_NEEDS_NAMES.has(category.name)
+      })
+  })
+
 export default db
 
 export async function saveCommandAlias(
@@ -359,6 +388,7 @@ export async function addCategory(input: {
   name: string
   kind: CategoryKind
   color: string
+  isNeed?: boolean
 }): Promise<number> {
   const trimmed = input.name.trim()
   if (!trimmed) {
@@ -379,6 +409,7 @@ export async function addCategory(input: {
     name: trimmed,
     kind: input.kind,
     color: input.color,
+    isNeed: input.kind === 'expense' ? (input.isNeed ?? false) : undefined,
   })
 }
 
@@ -389,7 +420,7 @@ export async function addCategory(input: {
  */
 export async function updateCategory(
   id: number,
-  patch: Partial<Pick<Category, 'name' | 'color'>>,
+  patch: Partial<Pick<Category, 'name' | 'color' | 'isNeed'>>,
 ): Promise<void> {
   const category = await db.categories.get(id)
   if (!category) {
@@ -399,7 +430,7 @@ export async function updateCategory(
     throw new Error('System categories cannot be renamed or recolored.')
   }
 
-  const update: Partial<Pick<Category, 'name' | 'color'>> = {}
+  const update: Partial<Pick<Category, 'name' | 'color' | 'isNeed'>> = {}
   if (patch.name !== undefined) {
     const trimmed = patch.name.trim()
     if (!trimmed) {
@@ -409,6 +440,9 @@ export async function updateCategory(
   }
   if (patch.color !== undefined) {
     update.color = patch.color
+  }
+  if (patch.isNeed !== undefined) {
+    update.isNeed = patch.isNeed
   }
 
   await db.categories.update(id, update)
@@ -527,10 +561,10 @@ export async function seedIfEmpty() {
       const categories: Omit<Category, 'id'>[] = [
         { name: 'Salary', kind: 'income', color: '#22c55e' },
         { name: 'Other Income', kind: 'income', color: '#84cc16' },
-        { name: 'Groceries', kind: 'expense', color: '#f97316' },
-        { name: 'Rent', kind: 'expense', color: '#ef4444' },
-        { name: 'Utilities', kind: 'expense', color: '#eab308' },
-        { name: 'Transport', kind: 'expense', color: '#3b82f6' },
+        { name: 'Groceries', kind: 'expense', color: '#f97316', isNeed: true },
+        { name: 'Rent', kind: 'expense', color: '#ef4444', isNeed: true },
+        { name: 'Utilities', kind: 'expense', color: '#eab308', isNeed: true },
+        { name: 'Transport', kind: 'expense', color: '#3b82f6', isNeed: true },
         { name: 'Dining', kind: 'expense', color: '#ec4899' },
         { name: 'Subscriptions', kind: 'expense', color: '#a855f7' },
         { name: 'Other Expense', kind: 'expense', color: '#64748b' },

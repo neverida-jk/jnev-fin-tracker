@@ -15,7 +15,6 @@ import {
   BUDGET_RULE_50_30_20,
   BUDGET_RULE_TOLERANCE,
   IMPULSE_COOLDOWN_AMOUNT,
-  NEEDS_CATEGORIES,
   PURCHASE_CAUTION_FRACTION,
 } from './financialKnowledge'
 
@@ -32,6 +31,8 @@ export interface FinancialContext {
   categories: {
     name: string
     kind: Category['kind']
+    /** Expense-only "need" vs "want" per the 50/30/20 split. Undefined (income rows, or unclassified expenses) reads as "want". */
+    isNeed?: boolean
     /** Undefined when no budget is set. When set, `period` says whether
      * `limit` should be compared against spentThisWeek or spentThisMonth —
      * a weekly budget's pace is always judged against the week, regardless
@@ -68,6 +69,7 @@ export function buildFinancialContext(
       return {
         name: c.name,
         kind: c.kind,
+        isNeed: c.isNeed,
         budget: budget ? { limit: budget.limit, period: budget.period } : undefined,
         spentThisMonth: spentByCategoryThisMonth(transactions, c.id, today),
         spentThisWeek: spentByCategoryThisWeek(transactions, c.id, today),
@@ -158,8 +160,8 @@ export function composeBudgetHealthCheck(context: FinancialContext): string {
   }
 
   const expenseCats = context.categories.filter((c) => c.kind === 'expense')
-  const needsSpend = expenseCats.filter((c) => NEEDS_CATEGORIES.has(c.name)).reduce((s, c) => s + c.spentThisMonth, 0)
-  const wantsSpend = expenseCats.filter((c) => !NEEDS_CATEGORIES.has(c.name)).reduce((s, c) => s + c.spentThisMonth, 0)
+  const needsSpend = expenseCats.filter((c) => c.isNeed).reduce((s, c) => s + c.spentThisMonth, 0)
+  const wantsSpend = expenseCats.filter((c) => !c.isNeed).reduce((s, c) => s + c.spentThisMonth, 0)
   const saved = context.incomeThisMonth - context.expenseThisMonth
 
   const needsPct = needsSpend / context.incomeThisMonth

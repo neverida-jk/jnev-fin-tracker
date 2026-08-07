@@ -15,10 +15,6 @@ export const BUDGET_RULE_50_30_20 = {
 // How far off the 50/30/20 split before it's worth flagging.
 export const BUDGET_RULE_TOLERANCE = 0.05
 
-// Categories treated as "needs" for the 50/30/20 check — anything else
-// (Dining, Subscriptions, Other Expense, ...) defaults to "wants".
-export const NEEDS_CATEGORIES = new Set(['Rent', 'Utilities', 'Groceries', 'Transport'])
-
 // Recommended emergency-fund size, in months of expenses.
 export const EMERGENCY_FUND_MONTHS = { min: 3, max: 6 }
 

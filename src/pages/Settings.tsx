@@ -464,18 +464,24 @@ function CategoryRow({ category }: { category: Category }) {
   const [editing, setEditing] = useState(false)
   const [nameValue, setNameValue] = useState(category.name)
   const [colorValue, setColorValue] = useState(category.color)
+  const [isNeedValue, setIsNeedValue] = useState(category.isNeed ?? false)
   const [error, setError] = useState<string | null>(null)
 
   function startEdit() {
     setNameValue(category.name)
     setColorValue(category.color)
+    setIsNeedValue(category.isNeed ?? false)
     setError(null)
     setEditing(true)
   }
 
   async function saveEdit() {
     try {
-      await updateCategory(category.id, { name: nameValue, color: colorValue })
+      await updateCategory(category.id, {
+        name: nameValue,
+        color: colorValue,
+        ...(category.kind === 'expense' ? { isNeed: isNeedValue } : {}),
+      })
       setEditing(false)
       setError(null)
     } catch (err) {
@@ -546,6 +552,9 @@ function CategoryRow({ category }: { category: Category }) {
             </motion.button>
           </div>
           <ColorSwatchPicker value={colorValue} onChange={setColorValue} />
+          {category.kind === 'expense' && (
+            <NeedWantToggle value={isNeedValue} onChange={setIsNeedValue} layoutId={`need-want-pill-${category.id}`} />
+          )}
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2">
@@ -599,6 +608,41 @@ function CategoryRow({ category }: { category: Category }) {
   )
 }
 
+function NeedWantToggle({
+  value,
+  onChange,
+  layoutId,
+}: {
+  value: boolean
+  onChange: (isNeed: boolean) => void
+  layoutId: string
+}) {
+  return (
+    <div className="relative flex gap-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+      {([true, false] as const).map((option) => (
+        <button
+          type="button"
+          key={String(option)}
+          onClick={() => onChange(option)}
+          aria-pressed={value === option}
+          className={`relative z-10 flex-1 rounded-lg py-1.5 text-xs font-medium transition-colors ${
+            value === option ? 'text-white' : 'text-slate-600 dark:text-slate-300'
+          }`}
+        >
+          {value === option && (
+            <motion.span
+              layoutId={layoutId}
+              className="absolute inset-0 -z-10 rounded-lg bg-indigo-600"
+              transition={{ type: 'spring', stiffness: 500, damping: 34 }}
+            />
+          )}
+          {option ? 'Need' : 'Want'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function ColorSwatchPicker({
   value,
   onChange,
@@ -633,6 +677,7 @@ function AddCategoryForm() {
   const [name, setName] = useState('')
   const [kind, setKind] = useState<CategoryKind>('expense')
   const [color, setColor] = useState<string>(PRESET_COLORS[0])
+  const [isNeed, setIsNeed] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
@@ -640,6 +685,7 @@ function AddCategoryForm() {
     setName('')
     setKind('expense')
     setColor(PRESET_COLORS[0])
+    setIsNeed(false)
     setError(null)
     setSaved(false)
     setOpen(true)
@@ -648,7 +694,7 @@ function AddCategoryForm() {
   async function handleAdd() {
     setError(null)
     try {
-      await addCategory({ name, kind, color })
+      await addCategory({ name, kind, color, isNeed })
       setSaved(true)
       setTimeout(() => setOpen(false), 500)
     } catch (err) {
@@ -715,6 +761,8 @@ function AddCategoryForm() {
           />
 
           <ColorSwatchPicker value={color} onChange={setColor} />
+
+          {kind === 'expense' && <NeedWantToggle value={isNeed} onChange={setIsNeed} layoutId="new-category-need-want-pill" />}
 
           {error && (
             <p className="text-xs text-red-600 dark:text-red-400" role="alert">

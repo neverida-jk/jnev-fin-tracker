@@ -153,8 +153,8 @@ describe('composeBudgetHealthCheck', () => {
       incomeThisMonth: 10000,
       expenseThisMonth: 8000,
       categories: [
-        { name: 'Rent', kind: 'expense', spentThisMonth: 5000, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // needs
-        { name: 'Dining', kind: 'expense', spentThisMonth: 3000, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // wants
+        { name: 'Rent', kind: 'expense', isNeed: true, spentThisMonth: 5000, spentThisWeek: 0, avgMonthlyHistorical: 0 },
+        { name: 'Dining', kind: 'expense', isNeed: false, spentThisMonth: 3000, spentThisWeek: 0, avgMonthlyHistorical: 0 },
       ],
     })
     // needs 50%, wants 30%, saved (10000-8000)/10000 = 20% — exactly on target
@@ -166,8 +166,8 @@ describe('composeBudgetHealthCheck', () => {
       incomeThisMonth: 10000,
       expenseThisMonth: 9500,
       categories: [
-        { name: 'Rent', kind: 'expense', spentThisMonth: 7000, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // needs 70% > 55%
-        { name: 'Dining', kind: 'expense', spentThisMonth: 2500, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // wants 25%
+        { name: 'Rent', kind: 'expense', isNeed: true, spentThisMonth: 7000, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // needs 70% > 55%
+        { name: 'Dining', kind: 'expense', isNeed: false, spentThisMonth: 2500, spentThisWeek: 0, avgMonthlyHistorical: 0 }, // wants 25%
       ],
     })
     const answer = composeBudgetHealthCheck(ctx)
