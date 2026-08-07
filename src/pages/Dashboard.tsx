@@ -30,7 +30,8 @@ import PendingPayoutBanner from '../components/PendingPayoutBanner'
 import AnimatedMoney from '../components/AnimatedMoney'
 import Tile from '../components/Tile'
 import Card from '../components/Card'
-import { formatMoney, formatMonthLabel, formatWeekLabel } from '../lib/format'
+import { formatMoney, formatMonthLabel, formatWeekLabel, formatWeekRangeLabel } from '../lib/format'
+import { currentWeekKey } from '../lib/dates'
 import {
   accountBalance,
   netWorth,
@@ -71,6 +72,7 @@ export default function Dashboard() {
   // "Net worth over time" is deliberately excluded from this toggle and
   // stays monthly-only.
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('month')
+  const weekRangeLabel = formatWeekRangeLabel(currentWeekKey())
 
   const accounts = useLiveQuery(() => db.accounts.toArray(), [], [])
   const transactions = useLiveQuery(() => db.transactions.toArray(), [], [])
@@ -314,7 +316,7 @@ export default function Dashboard() {
         <Card tone="default" variants={fadeUpItem}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Spend by category (this {chartPeriod})
+              Spend by category ({chartPeriod === 'week' ? weekRangeLabel : 'this month'})
             </h2>
             <PeriodToggle
               period={chartPeriod}
@@ -400,7 +402,7 @@ export default function Dashboard() {
         <Card tone="default" variants={fadeUpItem}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-              Income vs expense by {chartPeriod}
+              Income vs expense {chartPeriod === 'week' ? `(${weekRangeLabel})` : 'by month'}
             </h2>
             <PeriodToggle
               period={chartPeriod}
@@ -568,6 +570,9 @@ function FinanceHealthTile({ input }: { input: MonthInReviewInput }) {
         <PeriodToggle period={period} setPeriod={setPeriod} idPrefix="health" label="Finance health period" />
       </div>
       <div className="space-y-2">
+        {period === 'week' && (
+          <p className="text-[11px] font-medium text-slate-400 dark:text-slate-500">{formatWeekRangeLabel(currentWeekKey())}</p>
+        )}
         <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{displayText}</p>
         {result.tier !== 'template' && (
           <span className="inline-flex shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">

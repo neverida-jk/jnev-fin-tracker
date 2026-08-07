@@ -1,9 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Gauge } from 'lucide-react'
 import db from '../db'
-import { computeDailyAllowance } from '../lib/dailyAllowance'
+import { buildFinancialContext, composeSuggestedSavings } from '../lib/financialContext'
 import { getNextPendingPayout } from '../lib/payout'
-import { formatMoney } from '../lib/format'
 import { parseISODate, todayISO } from '../lib/dates'
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24
@@ -29,19 +28,19 @@ function payoutPhrase(days: number): string {
  * the Quick Command FAB, which floats over its bottom-right corner. */
 export default function StatusStrip() {
   const transactions = useLiveQuery(() => db.transactions.toArray(), [], [])
+  const categories = useLiveQuery(() => db.categories.toArray(), [], [])
   const budgets = useLiveQuery(() => db.budgets.toArray(), [], [])
   const payoutSchedules = useLiveQuery(() => db.payoutSchedules.toArray(), [], [])
   const payoutDates = useLiveQuery(() => db.payoutDates.toArray(), [], [])
 
-  const loading = !transactions || !budgets
+  const loading = !transactions || !categories || !budgets
 
-  const allowance = loading ? null : computeDailyAllowance(budgets, transactions)
-  const allowanceText =
-    allowance === null
-      ? null
-      : allowance.amountPerDay === null
-        ? allowance.reason
-        : `${formatMoney(allowance.amountPerDay)}/day safe to spend`
+  // Net worth/accounts aren't part of what's shown here, so accounts and
+  // transfers are passed empty — buildFinancialContext only needs
+  // categories/transactions/budgets to produce incomeThisMonth/expenseThisMonth.
+  const savingsText = loading
+    ? null
+    : composeSuggestedSavings(buildFinancialContext([], categories, transactions, [], budgets))
 
   const nextPayout = getNextPendingPayout(payoutSchedules ?? [], payoutDates ?? [])
   const payoutText = nextPayout ? payoutPhrase(daysUntil(nextPayout.payoutDate.date)) : null
@@ -49,8 +48,8 @@ export default function StatusStrip() {
   const summary = loading
     ? 'Loading…'
     : payoutText
-      ? `${allowanceText} · ${payoutText}`
-      : allowanceText
+      ? `${savingsText} · ${payoutText}`
+      : savingsText
 
   return (
     <div className="shrink-0 border-t border-slate-200/70 bg-white/80 px-4 py-2 backdrop-blur-md dark:border-slate-800/70 dark:bg-slate-900/80">

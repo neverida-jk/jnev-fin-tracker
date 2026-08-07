@@ -27,7 +27,7 @@ import { ACCOUNT_ICONS } from '../lib/accountIcons'
 import { staggerContainer, fadeUpItem, tapScale } from '../lib/motion'
 import { exportBackup, importBackup } from '../lib/backup'
 import { listLocalSnapshots, restoreLocalSnapshot, MAX_SNAPSHOT_GENERATIONS } from '../lib/localSnapshot'
-import { detectNativeAi, isLocalModelEnabled, setLocalModelEnabled } from '../lib/aiEngine'
+import { detectNativeAi, generateWithLocalModel, isLocalModelEnabled, setLocalModelEnabled } from '../lib/aiEngine'
 import db, {
   addCategory,
   updateCategory,
@@ -1213,26 +1213,53 @@ function StorageSection() {
   )
 }
 
+type LocalModelStatus = 'idle' | 'checking' | 'ready' | 'error'
+
 function AiSection() {
   // null while detectNativeAi()'s promise is still in flight on mount.
   const [nativeAi, setNativeAi] = useState<boolean | null>(null)
   const [localModelEnabled, setLocalModelEnabledState] = useState(false)
+  // 'checking' doubles as "downloading" — generateWithLocalModel() resolves
+  // instantly if the model is already cached by the browser, or only after a
+  // real ~150-300MB download otherwise; either way this is the only reliable
+  // way to know which state it's in, since transformers.js exposes no
+  // separate "is it cached" check.
+  const [modelStatus, setModelStatus] = useState<LocalModelStatus>('idle')
+
+  const checkLocalModel = useCallback(async () => {
+    setModelStatus('checking')
+    try {
+      await generateWithLocalModel('Reply with the word OK.')
+      setModelStatus('ready')
+    } catch {
+      setModelStatus('error')
+    }
+  }, [])
 
   useEffect(() => {
-    setLocalModelEnabledState(isLocalModelEnabled())
+    const enabled = isLocalModelEnabled()
+    setLocalModelEnabledState(enabled)
     let cancelled = false
     detectNativeAi().then((result) => {
       if (!cancelled) setNativeAi(result)
     })
+    // Picks up "enabled but never actually verified" from a prior session —
+    // exactly the "it's on but I don't know if it's installed" gap.
+    if (enabled) checkLocalModel()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [checkLocalModel])
 
   function handleToggleLocalModel() {
     const next = !localModelEnabled
     setLocalModelEnabled(next)
     setLocalModelEnabledState(next)
+    if (next) {
+      checkLocalModel()
+    } else {
+      setModelStatus('idle')
+    }
   }
 
   return (
@@ -1257,15 +1284,23 @@ function AiSection() {
       ) : (
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-sm">
-            {localModelEnabled ? (
-              <Sparkles size={18} className="shrink-0 text-indigo-600 dark:text-indigo-400" />
-            ) : (
+            {!localModelEnabled ? (
               <FileText size={18} className="shrink-0 text-slate-400 dark:text-slate-500" />
+            ) : modelStatus === 'checking' ? (
+              <Loader2 size={18} className="shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
+            ) : modelStatus === 'error' ? (
+              <AlertTriangle size={18} className="shrink-0 text-amber-600 dark:text-amber-400" />
+            ) : (
+              <Sparkles size={18} className="shrink-0 text-indigo-600 dark:text-indigo-400" />
             )}
             <span className="text-slate-700 dark:text-slate-300">
-              {localModelEnabled
-                ? 'Local AI model: on — narratives will use it once the model has downloaded.'
-                : 'Using built-in templates (no AI enhancement active).'}
+              {!localModelEnabled
+                ? 'Using built-in templates (no AI enhancement active).'
+                : modelStatus === 'checking'
+                  ? 'Downloading model (roughly 150–300MB, first time only)...'
+                  : modelStatus === 'error'
+                    ? "Couldn't download the model — check your connection and retry."
+                    : 'Local AI model installed and ready — narratives will use it.'}
             </span>
           </div>
 
@@ -1278,11 +1313,23 @@ function AiSection() {
                 templates already work well without it.
               </p>
             </div>
-            <ToggleSwitch
-              checked={localModelEnabled}
-              onChange={handleToggleLocalModel}
-              label={localModelEnabled ? 'On' : 'Off'}
-            />
+            <div className="flex shrink-0 items-center gap-2">
+              {localModelEnabled && modelStatus === 'error' && (
+                <motion.button
+                  {...tapScale}
+                  type="button"
+                  onClick={checkLocalModel}
+                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white"
+                >
+                  Retry
+                </motion.button>
+              )}
+              <ToggleSwitch
+                checked={localModelEnabled}
+                onChange={handleToggleLocalModel}
+                label={localModelEnabled ? 'On' : 'Off'}
+              />
+            </div>
           </div>
         </div>
       )}

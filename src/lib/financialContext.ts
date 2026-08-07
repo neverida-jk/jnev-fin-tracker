@@ -148,6 +148,27 @@ export function composeLocalAnswer(context: FinancialContext, categoryName?: str
   return `Based on your past spending: ${breakdown} (~${formatMoney(total)}/month total). Set these as budgets in the Budgets tab.`
 }
 
+/** "How much should I set aside?" — the 20% savings slice of the classic
+ * 50/30/20 guideline, minus whatever's already been saved this month
+ * (income minus expenses so far). Mirrors composeBudgetHealthCheck's math,
+ * distilled to one actionable figure instead of a full recap — meant for a
+ * persistent, glanceable spot rather than an on-demand question. */
+export function composeSuggestedSavings(context: FinancialContext): string {
+  if (context.incomeThisMonth <= 0) {
+    return 'Log income to see a suggested savings amount'
+  }
+
+  const savedSoFar = context.incomeThisMonth - context.expenseThisMonth
+  const target = context.incomeThisMonth * BUDGET_RULE_50_30_20.savings
+  const remaining = target - savedSoFar
+
+  if (remaining <= 0) {
+    return `Already saved ${formatMoney(savedSoFar)} this month — past the ${pct(BUDGET_RULE_50_30_20.savings)} savings guideline`
+  }
+
+  return `Put aside ${formatMoney(remaining)} more this month to hit your ${pct(BUDGET_RULE_50_30_20.savings)} savings guideline`
+}
+
 function pct(fraction: number): string {
   return `${Math.round(fraction * 100)}%`
 }

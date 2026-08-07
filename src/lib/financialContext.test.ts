@@ -8,6 +8,7 @@ import {
   composePersonalizedHighlight,
   composePurchaseAdvice,
   composeSpendingPaceHighlight,
+  composeSuggestedSavings,
   type FinancialContext,
 } from './financialContext'
 import { formatMoney } from './format'
@@ -173,6 +174,24 @@ describe('composeBudgetHealthCheck', () => {
     const answer = composeBudgetHealthCheck(ctx)
     expect(answer).toContain('needs are above the usual 50% guideline')
     expect(answer).toContain("you're saving less than the usual 20% guideline") // saved 5% << 20%
+  })
+})
+
+describe('composeSuggestedSavings', () => {
+  it('asks for income to be logged first when there is none this month', () => {
+    expect(composeSuggestedSavings(makeContext({ incomeThisMonth: 0 }))).toContain('Log income')
+  })
+
+  it('suggests putting aside the remaining gap to the 20% guideline', () => {
+    // saved so far = 10000 - 8500 = 1500; target = 10000 * 0.2 = 2000; gap = 500
+    const ctx = makeContext({ incomeThisMonth: 10000, expenseThisMonth: 8500 })
+    expect(composeSuggestedSavings(ctx)).toBe('Put aside ₱500.00 more this month to hit your 20% savings guideline')
+  })
+
+  it('says the guideline is already met when saved-so-far is at or above the 20% target', () => {
+    // saved so far = 10000 - 7000 = 3000, above the 2000 target
+    const ctx = makeContext({ incomeThisMonth: 10000, expenseThisMonth: 7000 })
+    expect(composeSuggestedSavings(ctx)).toBe('Already saved ₱3,000.00 this month — past the 20% savings guideline')
   })
 })
 
