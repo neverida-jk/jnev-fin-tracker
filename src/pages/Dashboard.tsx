@@ -32,7 +32,8 @@ import AnimatedMoney from '../components/AnimatedMoney'
 import Tile from '../components/Tile'
 import Card from '../components/Card'
 import { formatMoney, formatMonthLabel, formatWeekLabel, formatWeekRangeLabel } from '../lib/format'
-import { currentWeekKey } from '../lib/dates'
+import { currentWeekKey, parseISODate } from '../lib/dates'
+import { composeCashFlowForecast, computeCashFlowForecast } from '../lib/cashFlowForecast'
 import {
   accountBalance,
   netWorth,
@@ -82,6 +83,8 @@ export default function Dashboard() {
   const categories = useLiveQuery(() => db.categories.toArray(), [], [])
   const budgets = useLiveQuery(() => db.budgets.toArray(), [], [])
   const bills = useLiveQuery(() => db.recurringBills.toArray(), [], [])
+  const payoutSchedules = useLiveQuery(() => db.payoutSchedules.toArray(), [], [])
+  const payoutDates = useLiveQuery(() => db.payoutDates.toArray(), [], [])
 
   const loading = !accounts || !transactions || !categories || !budgets || !bills
   const categoriesById = new Map((categories ?? []).map((c) => [c.id, c]))
@@ -117,6 +120,21 @@ export default function Dashboard() {
   const personalizedHighlight = financialContext
     ? composePersonalizedHighlight(financialContext, monthlySeries)
     : null
+  const cashFlowForecast = loading
+    ? null
+    : computeCashFlowForecast(
+        accounts,
+        categories,
+        transactions,
+        transfers ?? [],
+        bills,
+        payoutSchedules ?? [],
+        payoutDates ?? [],
+      )
+  const cashFlowChartData = (cashFlowForecast?.days ?? []).map((d) => ({
+    date: parseISODate(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    Balance: d.balance,
+  }))
   const isAnomaly = anomalies.length > 0
   const insightMessage = anomalies[0]?.message ?? personalizedHighlight ?? null
 
@@ -414,6 +432,60 @@ export default function Dashboard() {
               </LineChart>
             </ResponsiveContainer>
           </div>
+        </Card>
+
+        <Card tone="default" variants={fadeUpItem}>
+          <h2 className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">Cash flow to payday</h2>
+          {cashFlowForecast === null ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Set up a payout schedule (Bills tab) to see a projection to your next payday.
+            </p>
+          ) : (
+            <>
+              <p
+                className={`mb-2 text-sm ${
+                  cashFlowForecast.lowestBalance < 0
+                    ? 'text-red-600 dark:text-red-400'
+                    : 'text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                {composeCashFlowForecast(cashFlowForecast)}
+              </p>
+              <div className="h-32">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={cashFlowChartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+                    <CartesianGrid
+                      vertical={false}
+                      strokeDasharray="0"
+                      className="stroke-slate-100 dark:stroke-slate-700/50"
+                    />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 10, fill: 'currentColor' }}
+                      className="text-slate-400 dark:text-slate-500"
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis hide />
+                    <Tooltip
+                      formatter={(value) => formatMoney(Number(value))}
+                      contentStyle={tooltipContentStyle}
+                      wrapperStyle={tooltipWrapperStyle}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="Balance"
+                      stroke={cashFlowForecast.lowestBalance < 0 ? '#dc2626' : '#4f46e5'}
+                      strokeWidth={1.5}
+                      dot={false}
+                      animationDuration={800}
+                      animationEasing="ease-out"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </>
+          )}
         </Card>
 
         <Card tone="default" variants={fadeUpItem}>

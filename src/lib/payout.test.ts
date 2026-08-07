@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PayoutDate, PayoutSchedule } from '../db'
-import { getNextPendingPayout, getPendingPayoutDates } from './payout'
+import { getNextPendingPayout, getNextUpcomingPayoutDate, getPendingPayoutDates } from './payout'
 
 const TODAY = new Date('2026-07-31T12:00:00')
 
@@ -81,5 +81,30 @@ describe('getNextPendingPayout', () => {
     const result = getNextPendingPayout(schedules, dates, TODAY)
     expect(result?.payoutDate.id).toBe(2)
     expect(result?.schedule.label).toBe('Bonus')
+  })
+})
+
+describe('getNextUpcomingPayoutDate', () => {
+  it('returns undefined when there is nothing in the future', () => {
+    expect(getNextUpcomingPayoutDate([schedule()], [payoutDate({ date: '2026-07-31' })], TODAY)).toBeUndefined()
+  })
+
+  it('excludes today itself — only strictly future dates count as "upcoming"', () => {
+    expect(getNextUpcomingPayoutDate([schedule()], [payoutDate({ date: '2026-07-31' })], TODAY)).toBeUndefined()
+    expect(getNextUpcomingPayoutDate([schedule()], [payoutDate({ date: '2026-08-01' })], TODAY)).toBeDefined()
+  })
+
+  it('returns the earliest future date, regardless of logged status', () => {
+    const schedules = [schedule()]
+    const dates = [
+      payoutDate({ id: 1, date: '2026-08-15' }),
+      payoutDate({ id: 2, date: '2026-08-01', loggedTransactionId: 99 }),
+    ]
+    const result = getNextUpcomingPayoutDate(schedules, dates, TODAY)
+    expect(result?.payoutDate.id).toBe(2)
+  })
+
+  it('excludes an inactive schedule', () => {
+    expect(getNextUpcomingPayoutDate([schedule({ active: false })], [payoutDate({ date: '2026-08-01' })], TODAY)).toBeUndefined()
   })
 })
