@@ -24,6 +24,7 @@ import {
   AlertTriangle,
   Sparkles,
   Newspaper,
+  Search,
 } from 'lucide-react'
 import db from '../db'
 import PendingPayoutBanner from '../components/PendingPayoutBanner'
@@ -222,6 +223,16 @@ export default function Dashboard() {
             ) : (
               <p className="tabular-money text-lg font-semibold text-slate-800 dark:text-slate-200">—</p>
             )}
+          </div>
+        </Tile>
+
+        <Tile to="/transactions" variants={fadeUpItem} className="col-span-1 justify-between">
+          <Search size={20} className="text-indigo-500" />
+          <div className="mt-6">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {loading ? '—' : `${transactions.length} transaction${transactions.length === 1 ? '' : 's'} logged`}
+            </p>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Search history</p>
           </div>
         </Tile>
 

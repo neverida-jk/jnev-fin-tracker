@@ -20,6 +20,9 @@ import {
   Sparkles,
   FileText,
   History,
+  Bell,
+  BellRing,
+  BellOff,
 } from 'lucide-react'
 import Card from '../components/Card'
 import PickerGrid, { type PickerItem } from '../components/PickerGrid'
@@ -28,6 +31,11 @@ import { staggerContainer, fadeUpItem, tapScale } from '../lib/motion'
 import { exportBackup, importBackup } from '../lib/backup'
 import { listLocalSnapshots, restoreLocalSnapshot, MAX_SNAPSHOT_GENERATIONS } from '../lib/localSnapshot'
 import { detectNativeAi, generateWithLocalModel, isLocalModelEnabled, setLocalModelEnabled } from '../lib/aiEngine'
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+  type NotificationStatus,
+} from '../lib/notifications'
 import db, {
   addCategory,
   updateCategory,
@@ -81,6 +89,7 @@ export default function Settings() {
       <CategoriesSection />
       <WordsSection />
       <StorageSection />
+      <NotificationsSection />
       <AiSection />
     </motion.div>
   )
@@ -1208,6 +1217,68 @@ function StorageSection() {
 
           {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
         </div>
+      )}
+    </Card>
+  )
+}
+
+function NotificationsSection() {
+  const [permission, setPermission] = useState<NotificationStatus | null>(null)
+  const [requesting, setRequesting] = useState(false)
+
+  useEffect(() => {
+    setPermission(getNotificationPermission())
+  }, [])
+
+  async function handleEnable() {
+    setRequesting(true)
+    try {
+      setPermission(await requestNotificationPermission())
+    } finally {
+      setRequesting(false)
+    }
+  }
+
+  return (
+    <Card variants={fadeUpItem}>
+      <h2 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-300">Notifications</h2>
+      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+        A reminder for bills due soon and pending payouts, checked each time you open the app. This
+        can't wake the app up in the background without a push server, so it's a nudge on check-in,
+        not a guaranteed background alert.
+      </p>
+
+      {permission === null ? (
+        <p className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+          <Loader2 size={14} className="animate-spin" /> Checking...
+        </p>
+      ) : permission === 'unsupported' ? (
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          This browser doesn't support notifications.
+        </p>
+      ) : permission === 'granted' ? (
+        <div className="flex items-center gap-2 text-sm">
+          <BellRing size={18} className="shrink-0 text-indigo-600 dark:text-indigo-400" />
+          <span className="text-slate-700 dark:text-slate-300">Notifications are on.</span>
+        </div>
+      ) : permission === 'denied' ? (
+        <div className="flex items-center gap-2 text-sm">
+          <BellOff size={18} className="shrink-0 text-amber-600 dark:text-amber-400" />
+          <span className="text-slate-700 dark:text-slate-300">
+            Blocked — enable notifications for this site in your browser settings to use this.
+          </span>
+        </div>
+      ) : (
+        <motion.button
+          {...tapScale}
+          type="button"
+          onClick={handleEnable}
+          disabled={requesting}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+        >
+          {requesting ? <Loader2 size={14} className="animate-spin" /> : <Bell size={14} />}
+          Enable notifications
+        </motion.button>
       )}
     </Card>
   )

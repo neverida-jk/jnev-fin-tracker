@@ -8,6 +8,7 @@ import db, {
   getOrCreateBalanceAdjustmentCategory,
   unarchiveCategory,
   updateCategory,
+  updateInvestedValue,
 } from './db'
 
 async function clearAllTables() {
@@ -101,6 +102,49 @@ describe('updateCategory', () => {
 
   it('throws when the category does not exist', async () => {
     await expect(updateCategory(9999, { name: 'Ghost' })).rejects.toThrow('Category not found.')
+  })
+})
+
+describe('updateInvestedValue', () => {
+  async function addAccount(type: 'investment' | 'checking' = 'investment'): Promise<number> {
+    return db.accounts.add({
+      id: undefined as unknown as number,
+      name: 'GoTrade',
+      type,
+      startingBalance: 0,
+      createdAt: '',
+    })
+  }
+
+  it('records the value and today as the update date', async () => {
+    const id = await addAccount()
+    await updateInvestedValue(id, 6500, new Date(2026, 6, 20))
+    const account = await db.accounts.get(id)
+    expect(account?.investedValue).toBe(6500)
+    expect(account?.investedValueUpdatedAt).toBe('2026-07-20')
+  })
+
+  it('overwrites a previous value on a later update', async () => {
+    const id = await addAccount()
+    await updateInvestedValue(id, 6500, new Date(2026, 6, 20))
+    await updateInvestedValue(id, 7200, new Date(2026, 6, 27))
+    const account = await db.accounts.get(id)
+    expect(account?.investedValue).toBe(7200)
+    expect(account?.investedValueUpdatedAt).toBe('2026-07-27')
+  })
+
+  it('refuses a negative value', async () => {
+    const id = await addAccount()
+    await expect(updateInvestedValue(id, -100)).rejects.toThrow('Enter a valid, non-negative value.')
+  })
+
+  it('refuses a non-investment account', async () => {
+    const id = await addAccount('checking')
+    await expect(updateInvestedValue(id, 100)).rejects.toThrow('Only investment accounts track a current value.')
+  })
+
+  it('throws when the account does not exist', async () => {
+    await expect(updateInvestedValue(9999, 100)).rejects.toThrow('Account not found.')
   })
 })
 

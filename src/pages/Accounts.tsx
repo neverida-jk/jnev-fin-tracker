@@ -11,12 +11,14 @@ import {
   Check,
   Pencil,
   Trash2,
+  TrendingUp,
   X,
 } from 'lucide-react'
 import db, {
   getOrCreateBalanceAdjustmentCategory,
   updateTransaction,
   deleteTransaction,
+  updateInvestedValue,
   renameAccount,
   deleteAccount,
   type Account,
@@ -267,6 +269,9 @@ function AccountCard({
         <span className="tabular-money font-semibold text-slate-800 dark:text-slate-200">
           {formatMoney(balance)}
         </span>
+        {account.type === 'investment' && (
+          <span className="-mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">contributed</span>
+        )}
 
         {accountError && (
           <p className="text-xs text-red-600 dark:text-red-400" role="alert">
@@ -284,6 +289,7 @@ function AccountCard({
             className="border-t border-slate-100 px-4 dark:border-slate-700/60"
           >
             <AddBalanceForm accountId={account.id} />
+            {account.type === 'investment' && <InvestedValueForm account={account} />}
             {accountHistory.length === 0 ? (
               <p className="py-3 text-sm text-slate-500 dark:text-slate-400">No transactions yet.</p>
             ) : (
@@ -337,7 +343,7 @@ function AccountCard({
   )
 }
 
-function TransactionEditForm({
+export function TransactionEditForm({
   transaction,
   categories,
   onClose,
@@ -644,6 +650,93 @@ function AddAccountFlow() {
         )}
       </AnimatePresence>
     </Card>
+  )
+}
+
+function InvestedValueForm({ account }: { account: Account }) {
+  const [open, setOpen] = useState(false)
+  const [value, setValue] = useState(String(account.investedValue ?? ''))
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    try {
+      await updateInvestedValue(account.id, Number(value))
+      setError(null)
+      setOpen(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update value.')
+    }
+  }
+
+  return (
+    <div className="border-b border-slate-100 py-2.5 dark:border-slate-800">
+      {account.investedValue !== undefined && (
+        <p className="mb-1.5 text-xs text-slate-500 dark:text-slate-400">
+          Current value{' '}
+          <span className="tabular-money font-medium text-slate-700 dark:text-slate-300">
+            {formatMoney(account.investedValue)}
+          </span>
+          {account.investedValueUpdatedAt &&
+            ` · updated ${parseISODate(account.investedValueUpdatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+        </p>
+      )}
+      <AnimatePresence mode="wait" initial={false}>
+        {open ? (
+          <motion.form
+            key="form"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            onSubmit={submit}
+            className="space-y-2 overflow-hidden"
+          >
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              autoFocus
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="Current value"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
+            />
+            {error && (
+              <p className="text-xs text-red-600 dark:text-red-400" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <motion.button
+                {...tapScale}
+                type="button"
+                onClick={() => setOpen(false)}
+                className="flex-1 rounded-xl bg-slate-100 py-1.5 text-xs dark:bg-slate-800"
+              >
+                Cancel
+              </motion.button>
+              <motion.button
+                {...tapScale}
+                type="submit"
+                className="flex-1 rounded-xl bg-linear-to-br from-brand-from to-brand-to py-1.5 text-xs font-semibold text-white shadow-sm shadow-violet-900/30"
+              >
+                Save value
+              </motion.button>
+            </div>
+          </motion.form>
+        ) : (
+          <motion.button
+            key="cta"
+            {...tapScale}
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400"
+          >
+            <TrendingUp size={13} /> {account.investedValue !== undefined ? 'Update value' : 'Set current value'}
+          </motion.button>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
 

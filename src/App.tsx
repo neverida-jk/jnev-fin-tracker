@@ -1,19 +1,22 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence } from 'framer-motion'
 import Header from './components/Header'
 import PageTransition from './components/PageTransition'
 import CommandBar from './components/CommandBar'
 import StatusStrip from './components/StatusStrip'
 import UpdateToast from './components/UpdateToast'
-import { seedIfEmpty } from './db'
+import db, { seedIfEmpty } from './db'
 import { shouldTakeSnapshotToday, takeLocalSnapshot } from './lib/localSnapshot'
+import { checkAndNotify } from './lib/notifications'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const AddTransaction = lazy(() => import('./pages/AddTransaction'))
 const Accounts = lazy(() => import('./pages/Accounts'))
 const Budgets = lazy(() => import('./pages/Budgets'))
 const Bills = lazy(() => import('./pages/Bills'))
+const Transactions = lazy(() => import('./pages/Transactions'))
 const Settings = lazy(() => import('./pages/Settings'))
 
 const titles: Record<string, string> = {
@@ -22,6 +25,7 @@ const titles: Record<string, string> = {
   '/accounts': 'Accounts',
   '/budgets': 'Budgets',
   '/bills': 'Bills & Payouts',
+  '/transactions': 'Transactions',
   '/settings': 'Settings',
 }
 
@@ -51,6 +55,19 @@ function App() {
     seedIfEmpty()
   }, [])
 
+  const bills = useLiveQuery(() => db.recurringBills.toArray(), [], [])
+  const payoutSchedules = useLiveQuery(() => db.payoutSchedules.toArray(), [], [])
+  const payoutDates = useLiveQuery(() => db.payoutDates.toArray(), [], [])
+
+  useEffect(() => {
+    // Best-effort, same as the snapshot check below — checkAndNotify no-ops
+    // entirely unless notification permission was already granted in
+    // Settings, and it self-dedupes to once per calendar day.
+    checkAndNotify(bills, payoutSchedules, payoutDates).catch((error) => {
+      console.error('Notification check failed:', error)
+    })
+  }, [bills, payoutSchedules, payoutDates])
+
   useEffect(() => {
     // Best-effort background snapshot: never let this block rendering or
     // surface an error to the user. Failures (e.g. IndexedDB unavailable)
@@ -75,6 +92,7 @@ function App() {
               <Route path="/accounts" element={<PageTransition><Accounts /></PageTransition>} />
               <Route path="/budgets" element={<PageTransition><Budgets /></PageTransition>} />
               <Route path="/bills" element={<PageTransition><Bills /></PageTransition>} />
+              <Route path="/transactions" element={<PageTransition><Transactions /></PageTransition>} />
               <Route path="/settings" element={<PageTransition><Settings /></PageTransition>} />
             </Routes>
           </AnimatePresence>

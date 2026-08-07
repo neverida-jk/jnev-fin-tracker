@@ -9,6 +9,8 @@ export interface Account {
   type: AccountType
   startingBalance: number
   createdAt: string
+  investedValue?: number // investment accounts only: last manually-reported current market value — purely informational, never folded into net worth (see isNetWorthTracked in lib/finance.ts)
+  investedValueUpdatedAt?: string // ISO date the value above was last updated
 }
 
 export interface Category {
@@ -328,6 +330,33 @@ export async function updateTransaction(
 /** Permanently removes a single transaction. */
 export async function deleteTransaction(id: number): Promise<void> {
   await db.transactions.delete(id)
+}
+
+/** Records the last known current market value for an investment account
+ * (e.g. what GoTrade reports today). Purely informational — never folded
+ * into net worth, since this app has no way to verify it and doesn't track
+ * individual positions or fees. */
+export async function updateInvestedValue(id: number, value: number, today: Date = new Date()): Promise<void> {
+  const account = await db.accounts.get(id)
+  if (!account) {
+    throw new Error('Account not found.')
+  }
+  if (account.type !== 'investment') {
+    throw new Error('Only investment accounts track a current value.')
+  }
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('Enter a valid, non-negative value.')
+  }
+  // Local calendar date, not today.toISOString() — that's UTC and would
+  // misdate this by a day for any zone ahead of UTC (e.g. Philippines,
+  // UTC+8) during the first hours of the local day.
+  const y = today.getFullYear()
+  const m = String(today.getMonth() + 1).padStart(2, '0')
+  const d = String(today.getDate()).padStart(2, '0')
+  await db.accounts.update(id, {
+    investedValue: value,
+    investedValueUpdatedAt: `${y}-${m}-${d}`,
+  })
 }
 
 /** Renames an account. Throws if the new name is blank. */
